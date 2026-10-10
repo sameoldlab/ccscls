@@ -1,0 +1,10 @@
+.p { color: red;                        /*~ p */
+  &.q { }                               /*~ q */
+  & .r { }                              /*~ r */
+  .s { }                                /*~ s */
+  &:hover { }
+  > .t { }                              /*~ t */
+  @media (min-width: 1px) { .u { } }    /*~ u */ /*ctx: @media (min-width: 1px) */
+  .v & { }                              /*~ v */
+}
+.after { }                              /*~ after */

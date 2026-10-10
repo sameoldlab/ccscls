@@ -1,0 +1,11 @@
+/* The CSS spec makes every code point >= U+0080 a valid identifier character. */
+.café { }                               /*~ café */
+.привет { }                             /*~ привет */
+.日本語 { }                             /*~ 日本語 */
+.😀 { }                                 /*~ 😀 */
+.مرحبا { }                              /*~ مرحبا */
+/* 😀 é 日本 */ .after-wide { }         /*~ after-wide */
+.a-ü.b-ß { }                            /*~ a-ü, b-ß */
+.x\01F600{ }                            /*~ x\01F600=>x😀 */
+[title="日本"] .ok { }                  /*~ ok */
+.日本語-a .日本語-b { content: "日本" } /*~ 日本語-a, 日本語-b */

@@ -1,0 +1,17 @@
+/* Every dot below is a number, a URL, a string or a comment: none is a class. */
+.real { margin: 1.5em .5s; padding: .5em .25rem }                 /*~ real */
+.bg { background: url(a.png) url(".fake.css") url(b.c.d) }        /*~ bg */
+.str { content: ".nope"; quotes: ".x" ".y" }                      /*~ str */
+/* .ghost { } */
+/* .also.ghost, .ghost2 { }
+   .ghost3 { } */
+.after-comment { }                                                /*~ after-comment */
+.w { width: calc(1.5px + .25px); transition: opacity .3s ease .1s } /*~ w */
+@import ".x.css";
+@import url(".y.css") screen;
+@charset "utf-8";
+.hex { color: #fff; background: #123456 }                         /*~ hex */
+@font-face { font-family: "x.y"; src: url(f.woff2) }
+@keyframes spin { from { opacity: 0 } 50% { opacity: .5 } to { opacity: 1 } }
+.k { animation: spin .5s; --x: .5; --y: calc(.5 * 2) }            /*~ k */
+@media (min-width: 40.5em) { }

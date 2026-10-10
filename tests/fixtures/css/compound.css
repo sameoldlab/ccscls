@@ -1,0 +1,13 @@
+.a.b.c { }                              /*~ a, b, c */
+.a.b:hover > .c { }                     /*~ a, b, c */
+a.x[href].y::before { }                 /*~ x, y */
+.p + .q ~ .r { }                        /*~ p, q, r */
+.a   .b	.c { }                          /*~ a, b, c */
+:is(.x, .y) { }                         /*~ x, y */
+.keep:not(.skip) { }                    /*~ keep, skip */
+:where(.w) .u:has(.h) { }               /*~ w, u, h */
+.s::after, .t::before { }               /*~ s, t */
+[data-x=".fake"], [class~="foo"] { }
+[class="a b"] .real { }                 /*~ real */
+.a:nth-child(2n+1) .b { }               /*~ a, b */
+.m:is(.n, .o:not(.q)) { }               /*~ m, n, o, q */

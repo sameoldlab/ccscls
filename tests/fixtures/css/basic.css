@@ -1,0 +1,16 @@
+/* Tags, ids and pseudo-classes without a class token are not classes. */
+div { color: red }
+#id { color: red }
+a:hover { color: red }
+.a { color: red; }                      /*~ a */
+.b, .c { color: blue; }                 /*~ b, c */
+div.d { margin: 0 }                     /*~ d */
+.e > .f { }                             /*~ e, f */
+.g /*~ g */
+{
+  color: red;
+}
+.h-1_x-Y9 { }                           /*~ h-1_x-Y9 */
+.-lead { }                              /*~ -lead */
+._under { }                             /*~ _under */
+.a { color: green }                     /*~ a */

@@ -1,0 +1,5 @@
+.ok1 { color: red; }                    /*~ ok1 */
+.broken-decl { color red; }             /*~ broken-decl */
+.after-broken { }                       /*~ after-broken */
+.ok2 { color: red; }                    /*~ ok2 */
+.unclosed-last { color: red;            /*~ unclosed-last */

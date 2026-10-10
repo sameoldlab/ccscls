@@ -1,0 +1,9 @@
+.sm\:flex { }                           /*~ sm\:flex=>sm:flex */
+.w-1\/2 { }                             /*~ w-1\/2=>w-1/2 */
+.\32xl\:p-4 { }                         /*~ \32xl\:p-4=>2xl:p-4 */
+.hover\:bg-red:hover { }                /*~ hover\:bg-red=>hover:bg-red */
+.a\.b { }                               /*~ a\.b=>a.b */
+.\31 0 { }                              /*~ \31 0=>10 */
+.\31 0.\31 1 { }                        /*~ \31 0=>10, \31 1=>11 */
+.md\:w-\[10px\] { }                     /*~ md\:w-\[10px\]=>md:w-[10px] */
+.\@container { }                        /*~ \@container=>@container */
