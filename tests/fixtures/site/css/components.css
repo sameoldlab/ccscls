@@ -1,0 +1,6 @@
+.card { border: 1px solid }                                       /*~ card */
+.card-title { font-weight: bold }                                 /*~ card-title */
+@media (min-width: 600px) {
+  .btn { padding: 12px }                                          /*~ btn */ /*ctx: @media (min-width: 600px) */
+  .home { display: grid }                                         /*~ home */ /*ctx: @media (min-width: 600px) */
+}

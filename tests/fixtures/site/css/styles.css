@@ -1,0 +1,5 @@
+.page { margin: 0 }                                               /*~ page */
+.title { font-size: 2rem }                                        /*~ title */
+.btn { padding: 4px 8px }                                         /*~ btn */
+.btn-large { padding: 8px 16px }                                  /*~ btn-large */
+.btn:hover, .btn.active { background: #eee }                      /*~ btn, btn, active */

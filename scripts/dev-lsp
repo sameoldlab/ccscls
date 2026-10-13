@@ -1,0 +1,8 @@
+#!/bin/sh
+# Point your editor's language-server command at this script. Every (re)start of
+# the server rebuilds first, so `lsp-stop; lsp-start` (or restarting the editor
+# integration) always runs your latest code. Logs go to $CSS_CLASS_LSP_LOGFILE.
+cd "$(dirname "$0")/.." || exit 1
+cargo build -q 1>&2 || exit 1
+export CSS_CLASS_LSP_LOG=1
+exec target/debug/css-class-lsp "$@" 2>>"${CSS_CLASS_LSP_LOGFILE:-/tmp/css-class-lsp.log}"

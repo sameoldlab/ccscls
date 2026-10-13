@@ -1,0 +1,5 @@
+.page { margin: 0; font-family: system-ui }
+.title { font-size: 2rem }
+.btn { padding: 4px 8px }
+.btn:hover, .btn.active { background: #eee }
+.btn-primary { background: royalblue; color: white }

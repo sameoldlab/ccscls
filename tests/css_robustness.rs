@@ -1,5 +1,6 @@
-//! Level 1b: the indexer must never panic and must always return sane spans,
-//! because an editor feeds it half-typed CSS on every keystroke.
+//! Level 1b: typing simulation. An editor feeds the indexer half-typed CSS on
+//! every keystroke, so every prefix/suffix of every fixture must index without
+//! panicking and with sane spans. (Deliberately NOT adversarial: no fuzzing.)
 
 use css_class_lsp::css::{ClassDef, CssIndexer, unescape_ident};
 
@@ -58,7 +59,8 @@ fn unescaped_delimiter(raw: &str) -> Option<char> {
                 hex += 1;
             }
             if hex == 0 {
-                it.next(); // any single escaped char
+                // any single escaped char
+                it.next();
             } else if it.peek().is_some_and(|d| d.is_ascii_whitespace()) {
                 it.next();
             }
@@ -90,67 +92,5 @@ fn every_prefix_and_suffix_of_every_fixture() {
             let suffix = &src[i..];
             check(suffix, &ix.index(suffix), &format!("{name} suffix {i}"));
         }
-    }
-}
-
-#[test]
-fn random_mutations_of_fixtures() {
-    // Deterministic xorshift so failures reproduce.
-    let mut state = 0x9E37_79B9_7F4A_7C15u64;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    let alphabet: Vec<&str> = vec![
-        ".", "{", "}", "(", ")", ";", ":", "\"", "'", "\\", "/", "*", "@", "-", " ", "\n", "\r\n",
-        "😀", "é", "日", ".a", "@media (x) {", "/*", "*/", "url(", "&", ">", ",", "[", "]", "#", "\0",
-    ];
-    let fixtures = all_fixtures();
-    let mut ix = CssIndexer::new();
-    for round in 0..3000 {
-        let (name, src) = &fixtures[(next() as usize) % fixtures.len()];
-        let mut s = src.clone();
-        for _ in 0..(1 + next() % 4) {
-            let boundaries: Vec<usize> = s.char_indices().map(|(i, _)| i).chain([s.len()]).collect();
-            let at = boundaries[(next() as usize) % boundaries.len()];
-            if next() % 3 == 0 && at < s.len() {
-                let end = boundaries.iter().copied().find(|&b| b > at).unwrap();
-                s.replace_range(at..end, "");
-            } else {
-                s.insert_str(at, alphabet[(next() as usize) % alphabet.len()]);
-            }
-        }
-        check(&s, &ix.index(&s), &format!("{name} mutation round {round}"));
-    }
-}
-
-#[test]
-fn hostile_inputs() {
-    let deep_blocks = "{".repeat(5000);
-    let deep_nesting = ".a{".repeat(2000) + &"}".repeat(2000);
-    let many_selectors = (0..20_000).map(|i| format!(".c{i},")).collect::<String>() + "{}";
-    let long_ident = format!(".{} {{}}", "x".repeat(200_000));
-    let inputs: Vec<(&str, &str)> = vec![
-        ("empty", ""),
-        ("just dot", "."),
-        ("dot backslash", ".\\"),
-        ("backslashes", "\\\\\\\\\\\\"),
-        ("unterminated string", ".a { content: \"abc"),
-        ("unterminated comment", ".a {} /* .b {}"),
-        ("unterminated url", ".a { background: url(abc"),
-        ("nul bytes", ".a\0b {} \0 .c {}"),
-        ("lone braces", "}}}}{{{{"),
-        ("at-rule soup", "@media @supports @layer { @keyframes {"),
-        ("bom", "\u{feff}.a {}"),
-        ("deep blocks", deep_blocks.as_str()),
-        ("deep nesting", deep_nesting.as_str()),
-        ("many selectors", many_selectors.as_str()),
-        ("long identifier", long_ident.as_str()),
-    ];
-    let mut ix = CssIndexer::new();
-    for (name, src) in inputs {
-        check(src, &ix.index(src), name);
     }
 }

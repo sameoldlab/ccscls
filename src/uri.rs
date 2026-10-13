@@ -8,63 +8,69 @@ use std::str::FromStr;
 /// it is the decoded path, otherwise the URI string.
 pub fn file_key(uri: &Uri) -> String {
     match uri_to_path(uri) {
-        Some(p) => p.to_string_lossy().into_owned(),
+        Some(path) => path.to_string_lossy().into_owned(),
         None => uri.as_str().to_owned(),
     }
 }
 
 pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
-    if !uri.scheme().is_some_and(|s| s.as_str().eq_ignore_ascii_case("file")) {
+    let is_file_scheme = uri
+        .scheme()
+        .is_some_and(|scheme| scheme.as_str().eq_ignore_ascii_case("file"));
+    if !is_file_scheme {
         return None;
     }
     let decoded = percent_decode(uri.path().as_str());
     // `file:///C:/x` carries the path "/C:/x".
-    let b = decoded.as_bytes();
-    let path = if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
-        &decoded[1..]
+    let has_drive_letter = matches!(
+        decoded.as_bytes(),
+        [b'/', drive, b':', ..] if drive.is_ascii_alphabetic()
+    );
+    let path = if has_drive_letter {
+        decoded.strip_prefix('/').unwrap_or(&decoded)
     } else {
-        &decoded[..]
+        &decoded
     };
     Some(PathBuf::from(path))
 }
 
 pub fn path_to_uri(path: &Path) -> Option<Uri> {
-    let s = path.to_str()?.replace('\\', "/");
-    let mut out = String::from("file://");
-    if !s.starts_with('/') {
-        out.push('/');
+    let text = path.to_str()?.replace('\\', "/");
+    let mut encoded = String::from("file://");
+    if !text.starts_with('/') {
+        encoded.push('/');
     }
-    for &b in s.as_bytes() {
-        match b {
+    for &byte in text.as_bytes() {
+        match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(b as char)
+                encoded.push(byte as char)
             }
-            _ => out.push_str(&format!("%{b:02X}")),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
         }
     }
-    Uri::from_str(&out).ok()
+    Uri::from_str(&encoded).ok()
 }
 
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                out.push(h * 16 + l);
-                i += 3;
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if let [b'%', high, low, ..] = &bytes[cursor..] {
+            if let (Some(high), Some(low)) = (hex_value(*high), hex_value(*low)) {
+                decoded.push(high * 16 + low);
+                cursor += 3;
                 continue;
             }
         }
-        out.push(b[i]);
-        i += 1;
+        decoded.push(bytes[cursor]);
+        cursor += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
-fn hex(b: u8) -> Option<u8> {
-    (b as char).to_digit(16).map(|d| d as u8)
+fn hex_value(byte: u8) -> Option<u8> {
+    (byte as char).to_digit(16).map(|digit| digit as u8)
 }
 
 #[cfg(test)]

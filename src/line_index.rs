@@ -15,9 +15,9 @@ impl LineIndex {
     pub fn new(text: &str) -> Self {
         let mut starts = Vec::with_capacity(text.len() / 32 + 1);
         starts.push(0);
-        for (i, b) in text.bytes().enumerate() {
-            if b == b'\n' {
-                starts.push((i + 1) as u32);
+        for (index, byte) in text.bytes().enumerate() {
+            if byte == b'\n' {
+                starts.push((index + 1) as u32);
             }
         }
         Self { starts }
@@ -30,9 +30,14 @@ impl LineIndex {
         while !text.is_char_boundary(offset) {
             offset -= 1;
         }
-        let line = self.starts.partition_point(|&s| s as usize <= offset) - 1;
-        let line_start = self.starts[line] as usize;
-        let character = text[line_start..offset].encode_utf16().count();
+        let line = self
+            .starts
+            .partition_point(|&line_start| line_start as usize <= offset)
+            .saturating_sub(1);
+        let line_start = self.starts.get(line).map_or(0, |&start| start as usize);
+        let character = text
+            .get(line_start..offset)
+            .map_or(0, |before_cursor| before_cursor.encode_utf16().count());
         Position::new(line as u32, character as u32)
     }
 
@@ -48,8 +53,8 @@ impl LineIndex {
         let end = self
             .starts
             .get(pos.line as usize + 1)
-            .map_or(text.len(), |&e| e as usize);
-        let line = &text[start..end];
+            .map_or(text.len(), |&next_line_start| next_line_start as usize);
+        let line = text.get(start..end).unwrap_or("");
         let line = line.strip_suffix('\n').unwrap_or(line);
         let line = line.strip_suffix('\r').unwrap_or(line);
 
@@ -77,12 +82,16 @@ mod tests {
         let t = "ab\ncde\n\nf";
         let li = LineIndex::new(t);
         assert_eq!(li.position(t, 0), p(0, 0));
-        assert_eq!(li.position(t, 2), p(0, 2)); // the '\n' itself
+        // the '\n' itself
+        assert_eq!(li.position(t, 2), p(0, 2));
         assert_eq!(li.position(t, 3), p(1, 0));
-        assert_eq!(li.position(t, 7), p(2, 0)); // empty line
+        // empty line
+        assert_eq!(li.position(t, 7), p(2, 0));
         assert_eq!(li.position(t, 8), p(3, 0));
-        assert_eq!(li.position(t, 9), p(3, 1)); // end of text
-        assert_eq!(li.position(t, 999), p(3, 1)); // clamped
+        // end of text
+        assert_eq!(li.position(t, 9), p(3, 1));
+        // clamped
+        assert_eq!(li.position(t, 999), p(3, 1));
     }
 
     #[test]
@@ -125,7 +134,8 @@ mod tests {
         let li = LineIndex::new(t);
         for (i, _) in t.char_indices() {
             if t[i..].starts_with('\n') && t[..i].ends_with('\r') {
-                continue; // the '\n' of CRLF is not addressable
+                // the '\n' of CRLF is not addressable
+                continue;
             }
             assert_eq!(li.offset(t, li.position(t, i)), i, "offset {i}");
         }

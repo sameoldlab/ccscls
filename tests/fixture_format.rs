@@ -41,7 +41,8 @@ fn expected_ranges_skip_longer_identifiers_and_count_utf16() {
 fn cursor_marker_gives_utf16_position() {
     let (text, pos) = parse_cursor("a\n😀é.b$0tn");
     assert_eq!(text, "a\n😀é.btn");
-    assert_eq!(pos, Position::new(1, 5)); // 😀=2, é=1, '.'=1, 'b'=1
+    // 😀=2, é=1, '.'=1, 'b'=1
+    assert_eq!(pos, Position::new(1, 5));
 }
 
 #[test]

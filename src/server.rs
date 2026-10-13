@@ -7,28 +7,36 @@
 //!
 //! Known limitation: the initial workspace scan runs on this thread, so
 //! requests that arrive during a scan are answered after it finishes.
+//!
+//! Set `CSS_CLASS_LSP_LOG=1` to log every message and its handling time to stderr.
 
 use crate::css::Span;
+use crate::markup;
 use crate::uri::{file_key, path_to_uri, uri_to_path};
-use crate::workspace::{DefRef, FileEntry, Workspace};
+use crate::workspace::{DefRef, FileEntry, FileKind, Workspace};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
-    Initialized, Notification as LspNotification,
+    Notification as LspNotification,
 };
-use lsp_types::request::{GotoDefinition, HoverRequest, References, Request as LspRequest};
+use lsp_types::request::{
+    Completion, GotoDefinition, HoverRequest, References, Request as LspRequest,
+};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, FileChangeType, FileSystemWatcher,
-    GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, Location, MarkupContent,
-    MarkupKind, OneOf, Range, ReferenceParams, Registration, RegistrationParams,
-    ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions,
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
+    CompletionTextEdit, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, FileChangeType, FileSystemWatcher, GlobPattern, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, MarkupContent, MarkupKind, OneOf, Range,
+    ReferenceParams, Registration, RegistrationParams, ServerCapabilities, ServerInfo,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextEdit,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
@@ -43,6 +51,10 @@ pub fn capabilities() -> ServerCapabilities {
             change: Some(TextDocumentSyncKind::FULL),
             ..Default::default()
         })),
+        completion_provider: Some(CompletionOptions {
+            trigger_characters: Some(vec!["\"".into(), "'".into(), " ".into()]),
+            ..Default::default()
+        }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
@@ -64,16 +76,29 @@ pub fn run(connection: Connection) -> Result<(), BoxError> {
     connection.initialize_finish(id, serde_json::to_value(result)?)?;
 
     let mut server = Server::new(&connection, &params);
+    if let Some(error) = server.ws.css_load_error() {
+        eprintln!("[css-class-lsp] the CSS grammar failed to load, so CSS indexing is disabled: {error}");
+    }
+    // `initialize_finish` has already consumed the client's `initialized`
+    // notification, so the post-handshake work happens here.
+    server.on_initialized()?;
     for msg in &connection.receiver {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
+                let (method, started) = (req.method.clone(), Instant::now());
                 server.handle_request(req)?;
+                server.log(format_args!("request {method} ({:?})", started.elapsed()));
             }
-            Message::Notification(note) => server.handle_notification(note)?,
-            Message::Response(_) => {} // replies to our own registerCapability
+            Message::Notification(note) => {
+                let (method, started) = (note.method.clone(), Instant::now());
+                server.handle_notification(note)?;
+                server.log(format_args!("notification {method} ({:?})", started.elapsed()));
+            }
+            // replies to our own registerCapability
+            Message::Response(_) => {}
         }
     }
     Ok(())
@@ -84,10 +109,12 @@ struct Server<'c> {
     ws: Workspace,
     roots: Vec<PathBuf>,
     can_register_watchers: bool,
+    log: bool,
 }
 
 impl<'c> Server<'c> {
-    #[allow(deprecated)] // root_uri: still sent by older clients
+    // root_uri: still sent by older clients
+    #[allow(deprecated)]
     fn new(conn: &'c Connection, params: &InitializeParams) -> Self {
         let mut roots: Vec<PathBuf> = params
             .workspace_folders
@@ -110,6 +137,13 @@ impl<'c> Server<'c> {
             ws: Workspace::new(),
             roots,
             can_register_watchers,
+            log: std::env::var_os("CSS_CLASS_LSP_LOG").is_some(),
+        }
+    }
+
+    fn log(&self, args: std::fmt::Arguments<'_>) {
+        if self.log {
+            eprintln!("[css-class-lsp] {args}");
         }
     }
 
@@ -117,7 +151,6 @@ impl<'c> Server<'c> {
 
     fn handle_notification(&mut self, note: Notification) -> Result<(), BoxError> {
         match note.method.as_str() {
-            Initialized::METHOD => self.on_initialized()?,
             DidOpenTextDocument::METHOD => {
                 if let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(note.params) {
                     self.on_open(p);
@@ -138,25 +171,36 @@ impl<'c> Server<'c> {
                     self.on_watched_files(p);
                 }
             }
-            _ => {} // unknown notifications must be ignored per the spec
+            // unknown notifications must be ignored per the spec
+            _ => {}
         }
         Ok(())
     }
 
     fn on_initialized(&mut self) -> Result<(), BoxError> {
+        let started = Instant::now();
         for root in self.roots.clone() {
             self.scan(&root);
         }
+        self.log(format_args!(
+            "scanned {} files under {:?} in {:?}",
+            self.ws.file_count(),
+            self.roots,
+            started.elapsed()
+        ));
         if self.can_register_watchers {
             let options = DidChangeWatchedFilesRegistrationOptions {
-                watchers: vec![FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.css".into()),
-                    kind: None,
-                }],
+                watchers: ["**/*.css", "**/*.html", "**/*.htm"]
+                    .into_iter()
+                    .map(|g| FileSystemWatcher {
+                        glob_pattern: GlobPattern::String(g.into()),
+                        kind: None,
+                    })
+                    .collect(),
             };
             let params = RegistrationParams {
                 registrations: vec![Registration {
-                    id: "css-class-lsp-watch-css".into(),
+                    id: "css-class-lsp-watch".into(),
                     method: DidChangeWatchedFiles::METHOD.into(),
                     register_options: Some(serde_json::to_value(options)?),
                 }],
@@ -177,14 +221,16 @@ impl<'c> Server<'c> {
             .build();
         for entry in walker.flatten() {
             let path = entry.path();
-            if entry.file_type().is_some_and(|t| t.is_file()) && is_css_path(path) {
-                self.load_from_disk(path);
+            if entry.file_type().is_some_and(|t| t.is_file()) {
+                if let Some(kind) = FileKind::detect(None, Some(path)) {
+                    self.load_from_disk(path, kind);
+                }
             }
         }
     }
 
     /// Index `path` from disk unless the client has it open (the buffer wins).
-    fn load_from_disk(&mut self, path: &Path) {
+    fn load_from_disk(&mut self, path: &Path, kind: FileKind) {
         let Some(uri) = path_to_uri(path) else { return };
         if self.ws.is_open(&file_key(&uri)) {
             return;
@@ -195,47 +241,51 @@ impl<'c> Server<'c> {
         }
         // Skips files that are not valid UTF-8.
         if let Ok(text) = std::fs::read_to_string(path) {
-            self.ws.upsert(uri, text, None);
+            self.ws.upsert(uri, text, kind, None);
         }
     }
 
     fn on_open(&mut self, p: DidOpenTextDocumentParams) {
         let doc = p.text_document;
-        let is_css = doc.language_id == "css"
-            || uri_to_path(&doc.uri).is_some_and(|p| is_css_path(&p));
-        if is_css {
-            self.ws.upsert(doc.uri, doc.text, Some(doc.version));
+        let path = uri_to_path(&doc.uri);
+        if let Some(kind) = FileKind::detect(Some(&doc.language_id), path.as_deref()) {
+            self.ws.upsert(doc.uri, doc.text, kind, Some(doc.version));
         }
     }
 
     fn on_change(&mut self, p: DidChangeTextDocumentParams) {
         let key = file_key(&p.text_document.uri);
-        if !self.ws.is_open(&key) {
+        let Some(kind) = self.ws.get(&key).filter(|f| f.open_version.is_some()).map(|f| f.kind) else {
             return;
-        }
+        };
         // We advertise full sync, so a compliant client sends the whole text.
         if let Some(change) = p.content_changes.into_iter().rev().find(|c| c.range.is_none()) {
-            self.ws
-                .upsert(p.text_document.uri, change.text, Some(p.text_document.version));
+            self.ws.upsert(
+                p.text_document.uri,
+                change.text,
+                kind,
+                Some(p.text_document.version),
+            );
         }
     }
 
     fn on_close(&mut self, p: DidCloseTextDocumentParams) {
         let key = file_key(&p.text_document.uri);
-        if !self.ws.is_open(&key) {
+        let Some(kind) = self.ws.get(&key).filter(|f| f.open_version.is_some()).map(|f| f.kind) else {
             return;
-        }
+        };
         // Fall back to what is on disk, or forget the file if there is none.
         self.ws.remove(&key);
         if let Some(path) = uri_to_path(&p.text_document.uri) {
-            self.load_from_disk(&path);
+            self.load_from_disk(&path, kind);
         }
     }
 
     fn on_watched_files(&mut self, p: DidChangeWatchedFilesParams) {
         for event in p.changes {
             let Some(path) = uri_to_path(&event.uri) else { continue };
-            if !is_css_path(&path) || has_component(&path, "node_modules") {
+            let Some(kind) = FileKind::detect(None, Some(&path)) else { continue };
+            if has_component(&path, "node_modules") {
                 continue;
             }
             let key = file_key(&event.uri);
@@ -244,7 +294,7 @@ impl<'c> Server<'c> {
                     self.ws.remove(&key);
                 }
             } else {
-                self.load_from_disk(&path);
+                self.load_from_disk(&path, kind);
             }
         }
     }
@@ -253,6 +303,7 @@ impl<'c> Server<'c> {
 
     fn handle_request(&mut self, req: Request) -> Result<(), BoxError> {
         match req.method.as_str() {
+            Completion::METHOD => self.dispatch::<Completion>(req, Self::completion),
             HoverRequest::METHOD => self.dispatch::<HoverRequest>(req, Self::hover),
             GotoDefinition::METHOD => self.dispatch::<GotoDefinition>(req, Self::definition),
             References::METHOD => self.dispatch::<References>(req, Self::references),
@@ -281,45 +332,76 @@ impl<'c> Server<'c> {
         Ok(())
     }
 
-    /// The file and class name under the cursor, if the cursor is on a class.
-    fn class_under_cursor(&self, pos: &TextDocumentPositionParams) -> Option<(&FileEntry, &crate::css::ClassDef)> {
+    /// The file and byte offset a position refers to.
+    fn locate(&self, pos: &TextDocumentPositionParams) -> Option<(String, &FileEntry, usize)> {
         let key = file_key(&pos.text_document.uri);
         let file = self.ws.get(&key)?;
         let offset = file.line_index.offset(&file.text, pos.position);
-        let def = crate::css::class_at(&file.defs, offset)?;
-        Some((file, def))
+        Some((key, file, offset))
+    }
+
+    fn completion(&self, p: CompletionParams) -> Option<CompletionResponse> {
+        let (_, file, offset) = self.locate(&p.text_document_position)?;
+        if file.kind != FileKind::Html {
+            return None;
+        }
+        let ctx = markup::class_context_at(&file.text, offset)?;
+        let range = range_of(file, ctx.replace);
+        let items = self
+            .ws
+            .class_names()
+            .into_iter()
+            .map(|(name, rules)| CompletionItem {
+                label: name.to_owned(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(format!("{rules} rule{}", if rules == 1 { "" } else { "s" })),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: name.to_owned(),
+                })),
+                ..Default::default()
+            })
+            .collect();
+        Some(CompletionResponse::Array(items))
     }
 
     fn hover(&self, p: HoverParams) -> Option<Hover> {
-        let (file, def) = self.class_under_cursor(&p.text_document_position_params)?;
-        let defs = self.ws.defs_named(&def.name);
-        let raw = &file.text[def.name_span.range()];
+        let (key, file, offset) = self.locate(&p.text_document_position_params)?;
+        let target = self.ws.target_at(&key, offset)?;
+        let raw = &file.text[target.span.range()];
+        let defs = self.ws.defs_named(target.name);
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: hover_markdown(raw, &defs),
             }),
-            range: Some(range_of(file, def.name_span)),
+            range: Some(range_of(file, target.span)),
         })
     }
 
     fn definition(&self, p: GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
-        let (_, def) = self.class_under_cursor(&p.text_document_position_params)?;
-        Some(GotoDefinitionResponse::Array(self.locations(&def.name)))
+        let (key, _, offset) = self.locate(&p.text_document_position_params)?;
+        let target = self.ws.target_at(&key, offset)?;
+        let locations = self.def_locations(target.name);
+        (!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations))
     }
 
     fn references(&self, p: ReferenceParams) -> Option<Vec<Location>> {
-        let (_, def) = self.class_under_cursor(&p.text_document_position)?;
-        // Only CSS-side occurrences are indexed so far; usages in markup come
-        // with the HTML/JSX/Svelte/Vue phase.
-        Some(if p.context.include_declaration {
-            self.locations(&def.name)
-        } else {
-            Vec::new()
-        })
+        let (key, _, offset) = self.locate(&p.text_document_position)?;
+        let target = self.ws.target_at(&key, offset)?;
+        let mut out = Vec::new();
+        if p.context.include_declaration {
+            out.extend(self.def_locations(target.name));
+        }
+        out.extend(self.ws.usages_named(target.name).iter().map(|u| Location {
+            uri: u.file.uri.clone(),
+            range: range_of(u.file, u.usage.span),
+        }));
+        out.sort_by_key(|l| (l.uri.as_str().to_owned(), l.range.start.line, l.range.start.character));
+        Some(out)
     }
 
-    fn locations(&self, name: &str) -> Vec<Location> {
+    fn def_locations(&self, name: &str) -> Vec<Location> {
         self.ws
             .defs_named(name)
             .iter()
@@ -340,10 +422,10 @@ fn range_of(file: &FileEntry, span: Span) -> Range {
 
 fn hover_markdown(raw_name: &str, defs: &[DefRef<'_>]) -> String {
     let n = defs.len();
-    let mut out = format!(
-        "**`.{raw_name}`** — {n} rule{}",
-        if n == 1 { "" } else { "s" }
-    );
+    if n == 0 {
+        return format!("**`.{raw_name}`** — no matching rule in the workspace CSS");
+    }
+    let mut out = format!("**`.{raw_name}`** — {n} rule{}", if n == 1 { "" } else { "s" });
     for d in defs.iter().take(MAX_HOVER_RULES) {
         let file_name = uri_to_path(&d.file.uri)
             .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
@@ -364,10 +446,6 @@ fn hover_markdown(raw_name: &str, defs: &[DefRef<'_>]) -> String {
         out.push_str(&format!("\n\n…and {} more", n - MAX_HOVER_RULES));
     }
     out
-}
-
-fn is_css_path(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("css"))
 }
 
 fn has_component(p: &Path, name: &str) -> bool {

@@ -1,0 +1,6 @@
+.card { border: 1px solid #ccc; border-radius: 8px }
+.card-body { padding: 1rem }
+@media (min-width: 600px) {
+  .btn { padding: 8px 16px }
+  .card { max-width: 40rem }
+}

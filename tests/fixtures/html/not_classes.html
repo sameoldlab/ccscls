@@ -1,0 +1,12 @@
+<!doctype html>
+<p id="btn" data-class="nope" classes="nope2" title='class="nope3"'>text</p>
+<p>class="not-in-tag" .btn plain text</p>
+<!-- <div class="commented-out"> -->
+<script>const s = '<div class="in-script">'; if (a < b) { x = "class=\"q\"" }</script>
+<style>.btn[class="in-style"] { color: red }</style>
+<div class="{{ dynamic }} templated">templated values are opaque</div>
+<div class="<%= erb %> templated2">erb too</div>
+<div class="after-opaque">ok</div>                       <!--~ after-opaque -->
+</div>
+<br/>
+<p class="last">end</p>                                    <!--~ last -->

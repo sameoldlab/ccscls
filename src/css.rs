@@ -35,7 +35,9 @@ pub struct ClassDef {
 }
 
 pub struct CssIndexer {
-    parser: Parser,
+    /// `None` when the grammar could not be loaded; `index` then finds nothing.
+    parser: Option<Parser>,
+    load_error: Option<String>,
 }
 
 impl Default for CssIndexer {
@@ -47,23 +49,32 @@ impl Default for CssIndexer {
 impl CssIndexer {
     pub fn new() -> Self {
         let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_css::LANGUAGE.into())
-            .expect("tree-sitter-css grammar is compatible with the tree-sitter runtime");
-        Self { parser }
+        match parser.set_language(&tree_sitter_css::LANGUAGE.into()) {
+            Ok(()) => Self { parser: Some(parser), load_error: None },
+            Err(error) => Self { parser: None, load_error: Some(error.to_string()) },
+        }
+    }
+
+    /// Why the grammar failed to load (a tree-sitter ABI mismatch), if it did.
+    /// The server reports this at startup instead of crashing.
+    pub fn load_error(&self) -> Option<&str> {
+        self.load_error.as_deref()
     }
 
     /// Never fails: broken CSS yields whatever classes could be recovered.
     /// The result is sorted by position.
     pub fn index(&mut self, src: &str) -> Vec<ClassDef> {
-        let masked = mask_non_ascii(src);
-        let Some(tree) = self.parser.parse(masked.as_bytes(), None) else {
+        let Some(parser) = self.parser.as_mut() else {
             return Vec::new();
         };
-        let mut out = Vec::new();
-        collect(tree.root_node(), src, &mut out);
-        out.sort_by_key(|d| d.name_span.start);
-        out
+        let masked = mask_non_ascii(src);
+        let Some(tree) = parser.parse(masked.as_bytes(), None) else {
+            return Vec::new();
+        };
+        let mut definitions = Vec::new();
+        collect(tree.root_node(), src, &mut definitions);
+        definitions.sort_by_key(|definition| definition.name_span.start);
+        definitions
     }
 }
 
@@ -78,47 +89,47 @@ pub fn mask_non_ascii(src: &str) -> Cow<'_, str> {
     if src.is_ascii() {
         return Cow::Borrowed(src);
     }
-    let bytes: Vec<u8> = src
-        .bytes()
-        .map(|b| if b >= 0x80 { b'_' } else { b })
-        .collect();
-    Cow::Owned(String::from_utf8(bytes).expect("masked text is pure ASCII"))
+    let mut masked = String::with_capacity(src.len());
+    for byte in src.bytes() {
+        masked.push(if byte >= 0x80 { '_' } else { byte as char });
+    }
+    Cow::Owned(masked)
 }
 
 /// Find the class under `offset` (end-inclusive, so a cursor right after the
-/// last character still counts). `defs` must be sorted by position.
-pub fn class_at(defs: &[ClassDef], offset: usize) -> Option<&ClassDef> {
-    let idx = defs.partition_point(|d| d.name_span.start as usize <= offset);
-    let def = defs.get(idx.checked_sub(1)?)?;
-    (offset <= def.name_span.end as usize).then_some(def)
+/// last character still counts). `definitions` must be sorted by position.
+pub fn class_at(definitions: &[ClassDef], offset: usize) -> Option<&ClassDef> {
+    let starting_at_or_before = definitions.partition_point(|definition| definition.name_span.start as usize <= offset);
+    let candidate = definitions.get(starting_at_or_before.checked_sub(1)?)?;
+    (offset <= candidate.name_span.end as usize).then_some(candidate)
 }
 
-fn collect(root: Node, src: &str, out: &mut Vec<ClassDef>) {
-    let mut cur = root.walk();
+fn collect(root: Node, src: &str, definitions: &mut Vec<ClassDef>) {
+    let mut cursor = root.walk();
     'walk: loop {
-        let node = cur.node();
-        if node.kind() == "class_name"
-            && node.parent().is_some_and(|p| p.kind() == "class_selector")
-        {
-            if let Some(def) = make_def(node, src) {
-                out.push(def);
+        let node = cursor.node();
+        let is_class_token = node.kind() == "class_name"
+            && node.parent().is_some_and(|parent| parent.kind() == "class_selector");
+        if is_class_token {
+            if let Some(definition) = make_definition(node, src) {
+                definitions.push(definition);
             }
         }
-        if cur.goto_first_child() {
+        if cursor.goto_first_child() {
             continue;
         }
         loop {
-            if cur.goto_next_sibling() {
+            if cursor.goto_next_sibling() {
                 continue 'walk;
             }
-            if !cur.goto_parent() {
+            if !cursor.goto_parent() {
                 break 'walk;
             }
         }
     }
 }
 
-fn make_def(node: Node, src: &str) -> Option<ClassDef> {
+fn make_definition(node: Node, src: &str) -> Option<ClassDef> {
     if node.is_missing() || node.byte_range().is_empty() {
         return None;
     }
@@ -126,91 +137,95 @@ fn make_def(node: Node, src: &str) -> Option<ClassDef> {
     let raw = src.get(name_range.clone())?;
     // Do not trust the grammar for token boundaries: on garbage like `.w;-1`
     // it can swallow delimiters. Keep only the spec-valid identifier prefix.
-    let valid = valid_ident_prefix_len(raw);
-    if valid == 0 {
+    let valid_len = valid_ident_prefix_len(raw);
+    if valid_len == 0 {
         return None;
     }
-    name_range.end = name_range.start + valid;
-    let raw = &raw[..valid];
+    name_range.end = name_range.start + valid_len;
+    let raw = raw.get(..valid_len)?;
 
     let mut rule_range = None;
     let mut at_rules: Vec<Box<str>> = Vec::new();
-    let mut parent = node.parent();
-    while let Some(n) = parent {
-        match n.kind() {
-            "rule_set" if rule_range.is_none() => rule_range = Some(n.byte_range()),
+    let mut ancestor = node.parent();
+    while let Some(current) = ancestor {
+        match current.kind() {
+            "rule_set" if rule_range.is_none() => rule_range = Some(current.byte_range()),
             "media_statement" | "supports_statement" | "at_rule" => {
-                if let Some(p) = prelude(n, src) {
-                    at_rules.push(p);
+                if let Some(prelude_text) = prelude(current, src) {
+                    at_rules.push(prelude_text);
                 }
             }
             _ => {}
         }
-        parent = n.parent();
+        ancestor = current.parent();
     }
     at_rules.reverse();
 
     let rule_range = rule_range.unwrap_or_else(|| name_range.clone());
     Some(ClassDef {
         name: unescape_ident(raw).into(),
-        name_span: span(name_range),
-        rule_span: span(rule_range),
+        name_span: span_of(name_range),
+        rule_span: span_of(rule_range),
         context: at_rules,
     })
 }
 
-fn span(r: Range<usize>) -> Span {
+fn span_of(range: Range<usize>) -> Span {
     Span {
-        start: r.start as u32,
-        end: r.end as u32,
+        start: range.start as u32,
+        end: range.end as u32,
     }
 }
 
 /// `@media (min-width: 600px)` for a `media_statement`: source text up to the
 /// block, whitespace-collapsed.
 fn prelude(node: Node, src: &str) -> Option<Box<str>> {
-    let mut c = node.walk();
-    let block = node.children(&mut c).find(|ch| ch.kind() == "block")?;
+    let mut cursor = node.walk();
+    let block = node.children(&mut cursor).find(|child| child.kind() == "block")?;
     let text = src.get(node.start_byte()..block.start_byte())?;
-    let mut out = String::with_capacity(text.len());
+    let mut collapsed = String::with_capacity(text.len());
     for word in text.split_whitespace() {
-        if !out.is_empty() {
-            out.push(' ');
+        if !collapsed.is_empty() {
+            collapsed.push(' ');
         }
-        out.push_str(word);
+        collapsed.push_str(word);
     }
-    Some(out.into())
+    Some(collapsed.into())
 }
 
-/// Length in bytes of the longest prefix of `s` made of CSS identifier code
+/// Length in bytes of the longest prefix of `text` made of CSS identifier code
 /// points: ASCII alphanumerics, `-`, `_`, anything non-ASCII, and escapes
 /// (a backslash plus 1-6 hex digits and one optional whitespace, or a backslash
 /// plus any other non-newline character).
-pub fn valid_ident_prefix_len(s: &str) -> usize {
-    let mut it = s.char_indices().peekable();
+pub fn valid_ident_prefix_len(text: &str) -> usize {
+    let mut chars = text.char_indices().peekable();
     let mut end = 0;
-    while let Some((i, c)) = it.next() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' || !c.is_ascii() {
-            end = i + c.len_utf8();
-        } else if c == '\\' {
-            let Some(&(_, next)) = it.peek() else { break };
-            if next == '\n' || next == '\r' {
+    while let Some((offset, ch)) = chars.next() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii() {
+            end = offset + ch.len_utf8();
+        } else if ch == '\\' {
+            let Some(&(_, escaped)) = chars.peek() else { break };
+            if escaped == '\n' || escaped == '\r' {
                 break;
             }
-            let mut hex = 0;
-            while hex < 6 && it.peek().is_some_and(|&(_, d)| d.is_ascii_hexdigit()) {
-                let (j, d) = it.next().expect("peeked");
-                end = j + d.len_utf8();
-                hex += 1;
-            }
-            if hex == 0 {
-                let (j, d) = it.next().expect("peeked");
-                end = j + d.len_utf8();
-            } else if let Some(&(j, w)) = it.peek() {
-                if matches!(w, ' ' | '\t' | '\x0c') {
-                    it.next();
-                    end = j + w.len_utf8();
+            let mut hex_digits = 0;
+            while hex_digits < 6 {
+                match chars.next_if(|&(_, next)| next.is_ascii_hexdigit()) {
+                    Some((digit_offset, digit)) => {
+                        end = digit_offset + digit.len_utf8();
+                        hex_digits += 1;
+                    }
+                    None => break,
                 }
+            }
+            if hex_digits == 0 {
+                if let Some((escaped_offset, escaped_char)) = chars.next() {
+                    end = escaped_offset + escaped_char.len_utf8();
+                }
+            } else if let Some((space_offset, space)) =
+                chars.next_if(|&(_, next)| matches!(next, ' ' | '\t' | '\x0c'))
+            {
+                end = space_offset + space.len_utf8();
             }
         } else {
             break;
@@ -225,24 +240,24 @@ pub fn unescape_ident(raw: &str) -> Cow<'_, str> {
     if !raw.contains('\\') {
         return Cow::Borrowed(raw);
     }
-    let mut out = String::with_capacity(raw.len());
+    let mut unescaped = String::with_capacity(raw.len());
     let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            unescaped.push(ch);
             continue;
         }
         match chars.peek().copied() {
-            None => out.push('\u{FFFD}'),
-            Some(h) if h.is_ascii_hexdigit() => {
+            None => unescaped.push('\u{FFFD}'),
+            Some(first) if first.is_ascii_hexdigit() => {
                 let mut value = 0u32;
-                let mut digits = 0;
-                while digits < 6 {
-                    match chars.peek().and_then(|d| d.to_digit(16)) {
-                        Some(d) => {
-                            value = value * 16 + d;
+                let mut digit_count = 0;
+                while digit_count < 6 {
+                    match chars.peek().and_then(|next| next.to_digit(16)) {
+                        Some(digit_value) => {
+                            value = value * 16 + digit_value;
                             chars.next();
-                            digits += 1;
+                            digit_count += 1;
                         }
                         None => break,
                     }
@@ -256,16 +271,20 @@ pub fn unescape_ident(raw: &str) -> Cow<'_, str> {
                 } else if matches!(chars.peek(), Some(' ' | '\t' | '\n' | '\x0c')) {
                     chars.next();
                 }
-                out.push(
+                unescaped.push(
                     char::from_u32(value)
-                        .filter(|&c| c != '\0')
+                        .filter(|&decoded| decoded != '\0')
                         .unwrap_or('\u{FFFD}'),
                 );
             }
-            Some(_) => out.push(chars.next().expect("peeked")),
+            Some(_) => {
+                if let Some(escaped) = chars.next() {
+                    unescaped.push(escaped);
+                }
+            }
         }
     }
-    Cow::Owned(out)
+    Cow::Owned(unescaped)
 }
 
 #[cfg(test)]
@@ -279,14 +298,20 @@ mod tests {
             (r"sm\:flex", "sm:flex"),
             (r"w-1\/2", "w-1/2"),
             (r"a\.b", "a.b"),
-            (r"\31 0", "10"),         // hex escape eats one trailing space
-            (r"\31  0", "1 0"),       // ...but only one
-            (r"\32xl\:p-4", "2xl:p-4"), // 'x' is not a hex digit, ends the escape
+            // hex escape eats one trailing space
+            (r"\31 0", "10"),
+            // ...but only one
+            (r"\31  0", "1 0"),
+            // 'x' is not a hex digit, ends the escape
+            (r"\32xl\:p-4", "2xl:p-4"),
             (r"\1F600 ", "😀"),
             (r"\e9", "é"),
-            (r"\0", "\u{FFFD}"),        // NUL
-            (r"\D800", "\u{FFFD}"),     // surrogate
-            (r"\110000", "\u{FFFD}"),   // beyond U+10FFFF
+            // NUL
+            (r"\0", "\u{FFFD}"),
+            // surrogate
+            (r"\D800", "\u{FFFD}"),
+            // beyond U+10FFFF
+            (r"\110000", "\u{FFFD}"),
             (r"trailing\", "trailing\u{FFFD}"),
             (r"\\", "\\"),
         ];
@@ -302,12 +327,16 @@ mod tests {
             ("w;-1", "w"),
             ("a{b", "a"),
             (r"sm\:flex(x", r"sm\:flex"),
-            (r"\31 0 {", r"\31 0 "),
+            // 2nd space follows a plain char: not part of the token
+            (r"\31 0 {", r"\31 0"),
+            // the space right after a hex escape is
+            (r"x\1F600 {", r"x\1F600 "),
             ("日本)x", "日本"),
             ("a-b_c9.d", "a-b_c9"),
             ("", ""),
             (";a", ""),
-            ("a\\", "a"), // lone trailing backslash is not part of the token
+            // lone trailing backslash is not part of the token
+            ("a\\", "a"),
         ] {
             assert_eq!(&raw[..valid_ident_prefix_len(raw)], want, "raw = {raw:?}");
         }
@@ -342,9 +371,11 @@ mod tests {
         let src = ".ab {} .c {}";
         let defs = ix.index(src);
         assert_eq!(defs.len(), 2);
-        assert!(class_at(&defs, 0).is_none()); // on the dot
+        // on the dot
+        assert!(class_at(&defs, 0).is_none());
         assert_eq!(&*class_at(&defs, 1).unwrap().name, "ab");
-        assert_eq!(&*class_at(&defs, 3).unwrap().name, "ab"); // just after 'b'
+        // just after 'b'
+        assert_eq!(&*class_at(&defs, 3).unwrap().name, "ab");
         assert!(class_at(&defs, 4).is_none());
         assert_eq!(&*class_at(&defs, 8).unwrap().name, "c");
         assert!(class_at(&[], 0).is_none());

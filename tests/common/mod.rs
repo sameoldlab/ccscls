@@ -40,12 +40,34 @@ pub struct Expected {
     pub ctx: Vec<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Syntax {
+    /// `.btn { }  /*~ btn */`: class definitions in selectors.
+    Css,
+    /// `<p class="btn">  <!--~ btn -->`: class usages in attributes.
+    Html,
+}
+
+impl Syntax {
+    fn markers(self) -> (&'static str, &'static str) {
+        match self {
+            Syntax::Css => ("/*~", "*/"),
+            Syntax::Html => ("<!--~", "-->"),
+        }
+    }
+}
+
 pub fn parse_expectations(src: &str) -> Vec<Expected> {
+    parse_expectations_in(src, Syntax::Css)
+}
+
+pub fn parse_expectations_in(src: &str, syntax: Syntax) -> Vec<Expected> {
+    let (open, close) = syntax.markers();
     let mut out = Vec::new();
     for (i, line) in src.split('\n').enumerate() {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let Some(classes) = marker(line, "/*~") else { continue };
-        let ctx: Vec<String> = marker(line, "/*ctx:")
+        let Some(classes) = marker(line, open, close) else { continue };
+        let ctx: Vec<String> = marker(line, "/*ctx:", "*/")
             .map(|c| c.split('|').map(|s| s.trim().to_owned()).collect())
             .unwrap_or_default();
         for entry in classes.split(',').map(str::trim).filter(|e| !e.is_empty()) {
@@ -61,9 +83,9 @@ pub fn parse_expectations(src: &str) -> Vec<Expected> {
     out
 }
 
-fn marker<'a>(line: &'a str, open: &str) -> Option<&'a str> {
+fn marker<'a>(line: &'a str, open: &str, close: &str) -> Option<&'a str> {
     let start = line.find(open)? + open.len();
-    let end = line[start..].find("*/")? + start;
+    let end = line[start..].find(close)? + start;
     Some(line[start..end].trim())
 }
 
@@ -79,22 +101,43 @@ pub fn describe(src: &str, defs: &[ClassDef]) -> Vec<Expected> {
         .collect()
 }
 
-/// LSP ranges for each annotated class, computed independently of the server
-/// by scanning the annotated line for `.raw` (not followed by more identifier
-/// characters) and counting UTF-16 units.
+/// Same shape, for markup usages.
+pub fn describe_usages(src: &str, usages: &[css_class_lsp::markup::Usage]) -> Vec<Expected> {
+    usages
+        .iter()
+        .map(|u| Expected {
+            line: src[..u.span.start as usize].matches('\n').count() as u32,
+            raw: src[u.span.range()].to_owned(),
+            name: u.name.to_string(),
+            ctx: Vec::new(),
+        })
+        .collect()
+}
+
 pub fn expected_ranges(src: &str) -> Vec<(Expected, Range)> {
+    expected_ranges_in(src, Syntax::Css)
+}
+
+/// LSP ranges for each annotated class, computed independently of the server
+/// by scanning the annotated line for the token (not adjacent to more
+/// identifier characters) and counting UTF-16 units.
+pub fn expected_ranges_in(src: &str, syntax: Syntax) -> Vec<(Expected, Range)> {
     let lines: Vec<&str> = src
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .collect();
     let mut out = Vec::new();
-    let mut cursor = (u32::MAX, 0usize); // (line, byte offset consumed so far)
-    for e in parse_expectations(src) {
+    // (line, byte offset consumed so far)
+    let mut cursor = (u32::MAX, 0usize);
+    for e in parse_expectations_in(src, syntax) {
         let line = lines[e.line as usize];
         if cursor.0 != e.line {
             cursor = (e.line, 0);
         }
-        let needle = format!(".{}", e.raw);
+        let (lead, needle) = match syntax {
+            Syntax::Css => (1, format!(".{}", e.raw)),
+            Syntax::Html => (0, e.raw.clone()),
+        };
         let mut from = cursor.1;
         let idx = loop {
             let found = line[from..]
@@ -102,12 +145,14 @@ pub fn expected_ranges(src: &str) -> Vec<(Expected, Range)> {
                 .unwrap_or_else(|| panic!("`{needle}` not found on line {}: {line:?}", e.line))
                 + from;
             let after = found + needle.len();
-            if !line[after..].chars().next().is_some_and(is_ident_char) {
+            let before_ok = syntax == Syntax::Css
+                || !line[..found].chars().next_back().is_some_and(is_ident_char);
+            if before_ok && !line[after..].chars().next().is_some_and(is_ident_char) {
                 break found;
             }
             from = found + 1;
         };
-        let name_start = idx + 1;
+        let name_start = idx + lead;
         let name_end = name_start + e.raw.len();
         cursor.1 = name_end;
         let col = |byte: usize| line[..byte].encode_utf16().count() as u32;
@@ -169,14 +214,31 @@ impl TempWorkspace {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, text).unwrap();
     }
-    /// Annotated locations of `name` across every annotated `.css` file.
-    /// Files without `/*~` markers (the ignored ones) contribute nothing.
+    /// Annotated CSS locations of `name` across every `.css` file. Files
+    /// without markers (the ignored ones) contribute nothing.
     pub fn expected_locations(&self, name: &str) -> Vec<Location> {
+        self.expected(name, "css", Syntax::Css)
+    }
+
+    /// Annotated HTML usages of `name` across every `.html` file.
+    pub fn expected_usages(&self, name: &str) -> Vec<Location> {
+        self.expected(name, "html", Syntax::Html)
+    }
+
+    /// Definitions and usages together, as `references` with declarations returns them.
+    pub fn expected_references(&self, name: &str) -> Vec<Location> {
+        let mut v = self.expected_locations(name);
+        v.extend(self.expected_usages(name));
+        sort_locations(&mut v);
+        v
+    }
+
+    fn expected(&self, name: &str, ext: &str, syntax: Syntax) -> Vec<Location> {
         let mut out = Vec::new();
-        for path in walk_css(self.path()) {
+        for path in walk_files(self.path(), ext) {
             let src = std::fs::read_to_string(&path).unwrap();
             let uri = css_class_lsp::uri::path_to_uri(&path).unwrap();
-            for (e, range) in expected_ranges(&src) {
+            for (e, range) in expected_ranges_in(&src, syntax) {
                 if e.name == name {
                     out.push(Location { uri: uri.clone(), range });
                 }
@@ -184,6 +246,19 @@ impl TempWorkspace {
         }
         sort_locations(&mut out);
         out
+    }
+
+    /// Cursor position `chars_in` characters into the `nth` annotated occurrence
+    /// of `name` in `rel`.
+    pub fn cursor_on(&self, rel: &str, name: &str, nth: usize, chars_in: u32) -> Position {
+        let src = self.read(rel);
+        let syntax = if rel.ends_with(".css") { Syntax::Css } else { Syntax::Html };
+        let (_, r) = expected_ranges_in(&src, syntax)
+            .into_iter()
+            .filter(|(e, _)| e.name == name)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("no occurrence #{nth} of `{name}` in {rel}"));
+        Position::new(r.start.line, r.start.character + chars_in)
     }
 }
 
@@ -206,17 +281,32 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-fn walk_css(dir: &Path) -> Vec<PathBuf> {
+fn walk_files(dir: &Path, ext: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap() {
         let p = entry.unwrap().path();
         if p.is_dir() {
-            out.extend(walk_css(&p));
-        } else if p.extension().is_some_and(|e| e == "css") {
+            out.extend(walk_files(&p, ext));
+        } else if p.extension().is_some_and(|e| e == ext) {
             out.push(p);
         }
     }
     out.sort();
+    out
+}
+
+/// Apply LSP text edits (UTF-16 positions, all relative to the original text).
+pub fn apply_edits(text: &str, edits: &[lsp_types::TextEdit]) -> String {
+    let li = css_class_lsp::line_index::LineIndex::new(text);
+    let mut spans: Vec<(usize, usize, &str)> = edits
+        .iter()
+        .map(|e| (li.offset(text, e.range.start), li.offset(text, e.range.end), e.new_text.as_str()))
+        .collect();
+    spans.sort_by_key(|s| std::cmp::Reverse(s.0));
+    let mut out = text.to_owned();
+    for (start, end, new) in spans {
+        out.replace_range(start..end, new);
+    }
     out
 }
 
@@ -230,6 +320,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 pub struct ClientOptions {
     pub workspace: Option<PathBuf>,
     pub dynamic_watcher_registration: bool,
+    /// Sent as `initializationOptions`.
+    pub init_options: Option<serde_json::Value>,
 }
 
 type ServerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -269,6 +361,7 @@ impl TestClient {
         });
         let params = InitializeParams {
             workspace_folders: folders,
+            initialization_options: opts.init_options.clone(),
             capabilities: ClientCapabilities {
                 workspace: Some(WorkspaceClientCapabilities {
                     did_change_watched_files: Some(DidChangeWatchedFilesClientCapabilities {
@@ -335,9 +428,47 @@ impl TestClient {
         self.wait::<R>(id)
     }
 
+    /// Like `request`, but returns the error response instead of panicking.
+    pub fn try_request<R: lsp_types::request::Request>(&mut self, params: R::Params) -> Result<R::Result, ResponseError> {
+        let id = self.send::<R>(params);
+        self.wait_raw(&id).response_result.map(|v| serde_json::from_value(v).unwrap())
+    }
+
     pub fn request_err<R: lsp_types::request::Request>(&mut self, params: R::Params) -> ResponseError {
         let id = self.send::<R>(params);
         self.wait_raw(&id).response_result.expect_err("expected an error response")
+    }
+
+    /// A request with an arbitrary method name and JSON params.
+    pub fn raw_request(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, ResponseError> {
+        self.next_id += 1;
+        let id = RequestId::from(self.next_id);
+        self.conn
+            .sender
+            .send(Message::Request(Request::new(id.clone(), method.into(), params)))
+            .unwrap();
+        self.wait_raw(&id).response_result
+    }
+
+    /// Wait up to `timeout` for a notification with this method (already-received ones count).
+    pub fn wait_notification(&mut self, method: &str, timeout: Duration) -> Option<Notification> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(i) = self.notifications.iter().position(|n| n.method == method) {
+                return Some(self.notifications.remove(i));
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match self.conn.receiver.recv_timeout(left) {
+                Ok(Message::Notification(n)) => self.notifications.push(n),
+                Ok(Message::Response(r)) => self.stash.push(r),
+                Ok(Message::Request(req)) => {
+                    let reply = Response::new_ok(req.id.clone(), serde_json::Value::Null);
+                    self.conn.sender.send(Message::Response(reply)).unwrap();
+                    self.server_requests.push(req);
+                }
+                Err(_) => return None,
+            }
+        }
     }
 
     /// Wait until the server has gone idle on everything sent so far, by
@@ -444,4 +575,31 @@ pub fn hover_params(uri: &Uri, pos: Position) -> lsp_types::HoverParams {
 
 pub fn uri(s: &str) -> Uri {
     Uri::from_str(s).unwrap()
+}
+
+
+/// Position `chars_in` characters into the first occurrence of `needle`.
+pub fn position_of(text: &str, needle: &str, chars_in: usize) -> Position {
+    let idx = text.find(needle).unwrap_or_else(|| panic!("`{needle}` not in {text:?}")) + chars_in;
+    let line = text[..idx].matches('\n').count() as u32;
+    let line_start = text[..idx].rfind('\n').map_or(0, |i| i + 1);
+    Position::new(line, text[line_start..idx].encode_utf16().count() as u32)
+}
+
+/// Flatten a `WorkspaceEdit` (`changes` form) to uri -> edits.
+pub fn edits_by_uri(edit: &lsp_types::WorkspaceEdit) -> std::collections::BTreeMap<String, Vec<lsp_types::TextEdit>> {
+    edit.changes
+        .as_ref()
+        .expect("server must return `changes`")
+        .iter()
+        .map(|(u, e)| (u.as_str().to_owned(), e.clone()))
+        .collect()
+}
+
+pub fn rename_params(uri: &Uri, pos: Position, new_name: &str) -> lsp_types::RenameParams {
+    lsp_types::RenameParams {
+        text_document_position: position_params(uri, pos),
+        new_name: new_name.into(),
+        work_done_progress_params: Default::default(),
+    }
 }
