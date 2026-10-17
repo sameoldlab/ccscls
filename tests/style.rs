@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-const PENDING_NAME_CLEANUP: &[&str] = &["src/server.rs", "src/workspace.rs"];
+const PENDING_NAME_CLEANUP: &[&str] = &[];
 
 const PANIC_MARKERS: &[&str] = &[".unwrap()", ".expect(", "panic!(", "unreachable!(", "todo!(", "unimplemented!("];
 

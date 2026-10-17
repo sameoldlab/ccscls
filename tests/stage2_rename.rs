@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use css_class_lsp::{css::CssIndexer, markup};
+use css_class_lsp::languages::Language;
 use lsp_types::*;
 
 const TODO: &str = "stage 2: rename";
@@ -72,13 +72,13 @@ fn renaming_a_repeated_class_touches_every_occurrence_and_nothing_else() {
         let before = std::fs::read_to_string(&path).unwrap();
         let after = apply_edits(&before, &edits);
         if uri.ends_with(".css") {
-            let defs = CssIndexer::new().index(&after);
-            assert!(defs.iter().all(|d| &*d.name != "btn"), "{uri} still defines btn");
-            assert!(defs.iter().any(|d| &*d.name == "button"));
-            assert!(defs.iter().any(|d| &*d.name == "btn-large") || !before.contains("btn-large"), "btn-large must be untouched");
+            let defs = Observer::new().observe(Language::Css, &after);
+            assert!(defs.iter().all(|d| d.name != "btn"), "{uri} still defines btn");
+            assert!(defs.iter().any(|d| d.name == "button"));
+            assert!(defs.iter().any(|d| d.name == "btn-large") || !before.contains("btn-large"), "btn-large must be untouched");
         } else {
-            let usages = markup::usages(&after);
-            assert!(usages.iter().all(|u| &*u.name != "btn"), "{uri} still uses btn");
+            let usages = Observer::new().observe(Language::Html, &after);
+            assert!(usages.iter().all(|u| u.name != "btn"), "{uri} still uses btn");
         }
     }
     assert_eq!(total, 4 + 3, "4 rules + 3 usages");

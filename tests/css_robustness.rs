@@ -2,9 +2,11 @@
 //! every keystroke, so every prefix/suffix of every fixture must index without
 //! panicking and with sane spans. (Deliberately NOT adversarial: no fuzzing.)
 
-use css_class_lsp::css::{ClassDef, CssIndexer, unescape_ident};
+use css_class_lsp::languages::Language;
+use css_class_lsp::languages::css::unescape_ident;
 
 mod common;
+use common::{Observed, Observer};
 
 fn all_fixtures() -> Vec<(String, String)> {
     let dir = common::fixtures_dir().join("css");
@@ -20,7 +22,7 @@ fn all_fixtures() -> Vec<(String, String)> {
 }
 
 /// Structural invariants that must hold for ANY input.
-fn check(src: &str, defs: &[ClassDef], what: &str) {
+fn check(src: &str, defs: &[Observed], what: &str) {
     let mut prev_end = 0u32;
     for d in defs {
         let (s, e) = (d.name_span.start, d.name_span.end);
@@ -28,7 +30,7 @@ fn check(src: &str, defs: &[ClassDef], what: &str) {
         assert!(s >= prev_end, "{what}: spans overlap or are unsorted at {s}");
         prev_end = e;
         let raw = src.get(d.name_span.range()).unwrap_or_else(|| panic!("{what}: span {s}..{e} not on char boundaries"));
-        assert_eq!(&*d.name, &*unescape_ident(raw), "{what}: name != unescape(raw) for {raw:?}");
+        assert_eq!(d.name.as_str(), &*unescape_ident(raw), "{what}: name != unescape(raw) for {raw:?}");
         assert!(
             rule_span_ok(src, d),
             "{what}: rule span {:?} does not contain name span {:?}",
@@ -41,7 +43,7 @@ fn check(src: &str, defs: &[ClassDef], what: &str) {
     }
 }
 
-fn rule_span_ok(src: &str, d: &ClassDef) -> bool {
+fn rule_span_ok(src: &str, d: &Observed) -> bool {
     d.rule_span.start <= d.name_span.start
         && d.name_span.end <= d.rule_span.end
         && src.get(d.rule_span.range()).is_some()
@@ -73,24 +75,24 @@ fn unescaped_delimiter(raw: &str) -> Option<char> {
 
 #[test]
 fn fixtures_satisfy_invariants_and_are_deterministic() {
-    let mut ix = CssIndexer::new();
+    let mut ix = Observer::new();
     for (name, src) in all_fixtures() {
-        let a = ix.index(&src);
+        let a = ix.observe(Language::Css, &src);
         check(&src, &a, &name);
-        assert_eq!(a, ix.index(&src), "{name}: indexing twice differs");
+        assert_eq!(a, ix.observe(Language::Css, &src), "{name}: indexing twice differs");
     }
 }
 
 #[test]
 fn every_prefix_and_suffix_of_every_fixture() {
     // Simulates typing (prefixes) and deleting from the top (suffixes).
-    let mut ix = CssIndexer::new();
+    let mut ix = Observer::new();
     for (name, src) in all_fixtures() {
         for (i, _) in src.char_indices().chain([(src.len(), ' ')]) {
             let prefix = &src[..i];
-            check(prefix, &ix.index(prefix), &format!("{name} prefix {i}"));
+            check(prefix, &ix.observe(Language::Css, prefix), &format!("{name} prefix {i}"));
             let suffix = &src[i..];
-            check(suffix, &ix.index(suffix), &format!("{name} suffix {i}"));
+            check(suffix, &ix.observe(Language::Css, suffix), &format!("{name} suffix {i}"));
         }
     }
 }

@@ -76,18 +76,25 @@ violation of each rule fails all three checks.
 
 ## Current conformance
 
-Done:
+Done (stage A):
 
-- Trailing comments: none left anywhere (40 moved).
-- Panic sites in library code: none (`css.rs`: `expect`s removed, grammar load failure degrades).
-- Single-letter names: clean in `css.rs`, `line_index.rs`, `markup.rs`, `uri.rs`.
-- Slicing on externally supplied offsets replaced by `get(..)` in those files.
+- Trailing comments: none anywhere in Rust code.
+- Panic sites in library code: none. A panic boundary around each message turns an unexpected panic into an
+  internal-error response; startup problems (a grammar that fails to load) are reported on stderr.
+- Names: no single-letter bindings in `src/`; the pending list in `tests/style.rs` is empty.
+- Lifetimes: none on public types or on the server. Long-lived values are handles (`FileId`,
+  `OccurrenceId`, `NameId`) resolved through `Workspace`; borrowed views exist only inside a function.
+- Allocation: class names, at-rule preludes and other strings live in one pool (`Strings`) and are
+  referred to by `NameId`; at-rule chains are stored once per run of identical neighbours; per-name
+  occurrence lists are linked through the occurrences themselves instead of per-name vectors.
+- No `dyn`, no `Box` per item. Language dispatch is an enum with `match` in `languages/mod.rs`.
+- Errors: crate `Error` with a context chain and a `Context` extension, as `anyhow` does, no dependency.
+- Bounds: externally supplied offsets are read with `get(..)`.
 
-Pending, folded into roadmap stage A (they restructure the same code):
+Remaining:
 
-- `server.rs` and `workspace.rs`: single-letter names, `Server<'c>` and `DefRef<'a>`/`UsageRef<'a>`/`Target<'a>`
-  lifetimes, `Box<dyn Error>` in `run`'s signature.
-- `ClassDef` and `Usage` own `Box<str>` / `Vec<Box<str>>` per item: move to the shared pool with ids.
-- Crate error type and the panic boundary.
-- Per-file name-map entries `(file slot, index)` become generational handles.
-- Test-code names.
+- Test code has single-letter names (mostly `c` for the client and `u` for a URI); the rule applies to new
+  tests and they will be converted when touched.
+- The string pool never reclaims names; compaction would renumber every id.
+- Not machine-checked: handles-not-references and no-`Box` (reviewed by hand).
+- Stage A was last compiled and unit-tested before the integration tests were adapted; see ROADMAP.md.

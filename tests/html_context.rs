@@ -2,16 +2,16 @@
 //! using `$0` as the cursor marker.
 
 mod common;
-use common::parse_cursor;
+use common::{Observer, parse_cursor};
 use css_class_lsp::line_index::LineIndex;
-use css_class_lsp::markup::{self, class_context_at};
+use css_class_lsp::languages::Language;
 
 /// (text before the cursor's token, whole token) at `$0`, or None if the cursor
 /// is not in a class value.
 fn ctx(marked: &str) -> Option<(String, String)> {
     let (text, pos) = parse_cursor(marked);
     let offset = LineIndex::new(&text).offset(&text, pos);
-    let c = class_context_at(&text, offset)?;
+    let c = Language::Html.class_context_at(&text, offset)?;
     Some((text[c.prefix.range()].to_owned(), text[c.replace.range()].to_owned()))
 }
 
@@ -63,8 +63,9 @@ fn unterminated_value_while_typing() {
     assert_eq!(ctx(r#"<p class="typing ba$0"#), some("ba", "ba"));
     assert_eq!(ctx(r#"<p class="$0"#), some("", ""));
     assert_eq!(ctx(r#"<p class="a b$0"#), some("b", "b"));
-    let names: Vec<_> = markup::usages(r#"<p class="typing ba"#).into_iter().map(|u| u.name).collect();
-    assert_eq!(names.iter().map(|n| &**n).collect::<Vec<_>>(), vec!["typing", "ba"]);
+    let observed = Observer::new().observe(Language::Html, r#"<p class="typing ba"#);
+    let names: Vec<_> = observed.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, vec!["typing", "ba"]);
 }
 
 #[test]
@@ -79,8 +80,8 @@ fn multiline_values_and_attribute_layouts() {
 #[test]
 fn usages_in_multiline_value_have_correct_spans() {
     let src = "<div class=\"one\n   two\">";
-    let u = markup::usages(src);
+    let u = Observer::new().observe(Language::Html, src);
     assert_eq!(u.len(), 2);
-    assert_eq!(&src[u[0].span.range()], "one");
-    assert_eq!(&src[u[1].span.range()], "two");
+    assert_eq!(&src[u[0].name_span.range()], "one");
+    assert_eq!(&src[u[1].name_span.range()], "two");
 }

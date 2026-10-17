@@ -2,7 +2,9 @@
 //! LSP client. Included by each integration test via `mod common;`.
 #![allow(dead_code)]
 
-use css_class_lsp::css::ClassDef;
+use css_class_lsp::analysis::{FileAnalysis, Role, Span};
+use css_class_lsp::languages::{Engines, Language};
+use css_class_lsp::strings::Strings;
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response, ResponseError};
 use lsp_types::{
     ClientCapabilities, DidChangeWatchedFilesClientCapabilities, InitializeParams, InitializeResult,
@@ -89,27 +91,57 @@ fn marker<'a>(line: &'a str, open: &str, close: &str) -> Option<&'a str> {
     Some(line[start..end].trim())
 }
 
-/// What the indexer actually found, in the same shape as the annotations.
-pub fn describe(src: &str, defs: &[ClassDef]) -> Vec<Expected> {
-    defs.iter()
-        .map(|d| Expected {
-            line: src[..d.name_span.start as usize].matches('\n').count() as u32,
-            raw: src[d.name_span.range()].to_owned(),
-            name: d.name.to_string(),
-            ctx: d.context.iter().map(|c| c.to_string()).collect(),
-        })
-        .collect()
+/// One occurrence as a language handler reported it, with names resolved to text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Observed {
+    pub role: Role,
+    pub name: String,
+    pub name_span: Span,
+    pub rule_span: Span,
+    pub context: Vec<String>,
 }
 
-/// Same shape, for markup usages.
-pub fn describe_usages(src: &str, usages: &[css_class_lsp::markup::Usage]) -> Vec<Expected> {
-    usages
+/// Runs language handlers on text without a workspace, for level-1 tests.
+pub struct Observer {
+    engines: Engines,
+    strings: Strings,
+}
+
+impl Observer {
+    pub fn new() -> Self {
+        Self { engines: Engines::new(), strings: Strings::new() }
+    }
+
+    pub fn observe(&mut self, language: Language, source: &str) -> Vec<Observed> {
+        let mut analysis = FileAnalysis::default();
+        language.analyze(&mut self.engines, source, &mut self.strings, &mut analysis);
+        analysis
+            .occurrences
+            .iter()
+            .map(|occurrence| Observed {
+                role: occurrence.role,
+                name: self.strings.get(occurrence.name).to_owned(),
+                name_span: occurrence.name_span,
+                rule_span: occurrence.rule_span,
+                context: analysis
+                    .context_of(occurrence)
+                    .iter()
+                    .map(|id| self.strings.get(*id).to_owned())
+                    .collect(),
+            })
+            .collect()
+    }
+}
+
+/// What a handler actually found, in the same shape as the annotations.
+pub fn describe(src: &str, observed: &[Observed]) -> Vec<Expected> {
+    observed
         .iter()
-        .map(|u| Expected {
-            line: src[..u.span.start as usize].matches('\n').count() as u32,
-            raw: src[u.span.range()].to_owned(),
-            name: u.name.to_string(),
-            ctx: Vec::new(),
+        .map(|item| Expected {
+            line: src[..item.name_span.start as usize].matches('\n').count() as u32,
+            raw: src[item.name_span.range()].to_owned(),
+            name: item.name.clone(),
+            ctx: item.context.clone(),
         })
         .collect()
 }
@@ -324,7 +356,7 @@ pub struct ClientOptions {
     pub init_options: Option<serde_json::Value>,
 }
 
-type ServerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+type ServerResult = css_class_lsp::error::Result<()>;
 
 pub struct TestClient {
     conn: Connection,

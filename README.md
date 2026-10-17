@@ -69,10 +69,15 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
 
 ## Layout
 
-    src/css.rs        CSS text -> class definitions (tree-sitter-css)
-    src/markup.rs     HTML text -> class usages + cursor context (lexical, forgiving)
-    src/workspace.rs  files, name maps, lookups
-    src/server.rs     LSP loop and handlers
+    src/languages/    the seam: one module per file type behind the `Language` enum
+      mod.rs            detect, analyze, completion context, render name, watch globs
+      css.rs            selectors -> definitions (tree-sitter-css), CSS escaping
+      html.rs           class attributes -> usages (lexical scanner), cursor context
+    src/analysis.rs   language-neutral results: Occurrence, Role, Span, FileAnalysis
+    src/workspace.rs  files, generational handles, per-name occurrence lists
+    src/strings.rs    interned string pool (NameId)
+    src/server.rs     LSP loop and handlers, panic boundary
+    src/error.rs      Error with a context chain
     src/line_index.rs, src/uri.rs   coordinates and paths
     examples/query.rs, examples/dump.rs   dev tools (dump = print the tree-sitter tree)
 
@@ -81,7 +86,7 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
 * tree-sitter-css rejects non-Latin identifiers (`.привет`, `.日本語`, `.😀`) although the CSS
   spec allows them; non-ASCII bytes are masked to `_` before parsing (offsets unchanged).
 * Every class token in a selector is indexed (including `:not(.x)`), because rename must touch all.
-* A space after a hex escape (`.x\1F600 {}`) belongs to the name token; rename must re-add it.
+* A space after a hex escape (`.x\1F600 {}`) belongs to the name token; `render_name` re-adds it on rename.
 * `initialize_finish` swallows the `initialized` notification, so the initial scan runs right
   after the handshake (a stage 1 test caught this).
 * The initial scan blocks the message loop; requests queue until it finishes.

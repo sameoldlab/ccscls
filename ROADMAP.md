@@ -5,17 +5,32 @@ Run `cargo test` for the current state; `cargo test -- --ignored` lists unbuilt 
 
 ## 1. Where things stand
 
-**Done and tested** (68 tests pass, 25 specs are `#[ignore]`d on purpose):
+**Stage 1 (core loop)** and **stage A (language seam, both-sided file model, structural style)** are
+implemented.
 
-- CSS indexer on tree-sitter-css: every class token in a selector, with escapes resolved, enclosing
-  rule span, and the at-rule chain (`@media`, `@layer`, ...).
-- HTML class scanner (lexical, forgiving): `class` attribute values, cursor context for completion,
-  raw-text elements skipped, template syntax treated as opaque.
-- Workspace index: name maps for CSS definitions and markup usages, live buffers override disk,
-  file watching (dynamic registration), `.gitignore` and `node_modules` respected.
-- LSP: completion in `class="..."`, hover, goto definition, references (CSS and HTML, both directions).
-- Test tooling: annotated fixtures with known answers, in-process LSP client, stdio smoke test,
-  query CLI (`examples/query.rs`), playground, `scripts/dev-lsp` for Kakoune.
+Verification state, stated plainly:
+
+- The 41 library unit tests passed after the stage A rewrite, including a randomized check of the
+  intrusive name lists.
+- The integration tests (fixtures, LSP flow, style, stdio smoke) passed before stage A (74 tests). After
+  stage A only their glue code changed (how they obtain results from a language handler; no assertion
+  was edited). **They have not been run since.** The first `cargo test` on your machine is the real check.
+  One compile error found along the way (`Observed` needed `PartialEq`) was fixed by inspection.
+- The toolchain is no longer used to verify in this environment; if something fails, send the output.
+
+What exists:
+
+- `languages/` seam: `Language` enum with detect, analyze, completion context, render name, watch globs.
+  CSS and HTML handlers behind it. Nothing else in the crate matches on a file type.
+- Both-sided file model: a file holds definitions and usages together as one list of occurrences.
+- Handles and a string pool: generational `FileId`/`OccurrenceId`, interned `NameId`, per-name occurrence
+  lists linked by index. No lifetimes on the server, no `Box<str>` per item, no `dyn`.
+- Crate `Error` with a context chain, `Context` extension, per-message panic boundary, startup failures
+  reported instead of panicking.
+- LSP: completion in `class="..."`, hover, goto definition, references (CSS and HTML, both directions),
+  live buffers over disk, file watching, `.gitignore` and `node_modules` respected.
+- Tooling: annotated fixtures, in-process LSP client, stdio smoke test, query CLI, playground,
+  `scripts/dev-lsp`, style tests.
 
 **Known gaps in what exists** (none block the roadmap):
 
@@ -23,11 +38,10 @@ Run `cargo test` for the current state; `cargo test -- --ignored` lists unbuilt 
 - The initial scan blocks the message loop.
 - `.svelte` / `.vue` files are not recognised yet; the HTML scanner is not brace-aware.
 - The kak-lsp config snippet in the README is from memory and untested.
-- A token-trimming fix (`valid_ident_prefix_len` in `src/css.rs`) was found already in the tree and was
-  not written in the latest working stretch; it is covered by tests but deserves a read.
-- Style: trailing comments, panic sites and single-letter names are cleaned in the stable files and
-  enforced by `tests/style.rs`; `server.rs` and `workspace.rs` plus the structural items in STYLE.md are
-  pending and belong to stage A.
+- The string pool never reclaims names (a few bytes per distinct name ever seen).
+- Test code still has single-letter names (`c`, `u`); `src/` is clean.
+- `FileAnalysis` has no imports or embedded-region output yet; stage B adds imports, stage C regions,
+  so no dead code was written ahead of need.
 
 ## 2. The central problem: false positives
 
@@ -80,7 +94,7 @@ independently of the server, which is how soundness is tested.
 
 Order changed from the original plan. Mapping to existing spec files is in section 4.
 
-### Stage A: language seam and both-sided file model (behavior-preserving)
+### Stage A: language seam and both-sided file model (behavior-preserving) — implemented, partly verified
 
 Today file-type knowledge leaks into `FileKind`/`detect` (workspace), `upsert`/`target_at` (branching on
 kind) and the completion handler (hard-codes HTML).
@@ -116,7 +130,9 @@ kind) and the completion handler (hard-codes HTML).
 - Completion ranks verified first, ambient shown and labeled (never dropped). Hover shows chain or the
   "defined in X, no link from here" explanation, and distinguishes "not visible from here" from "nowhere".
 - Diagnostics: undefined = warning; ambient severity configurable (default off or hint).
-- Config: ambient severity, declared edges, ignore globs.
+- Config: ambient severity, declared edges, ignore globs. Reference points: css-variable-lsp takes a
+  configurable list of "lookup files" (globs) to index, and toba/css-lsp exposes `@import` / `url()` as
+  document links; both are prior art for declared edges and for the import list.
 - Unresolved or external import => file is open-world => no ambient error, no false claim.
 - Tests (replace the current stage 4 specs): scenario workspaces annotated with
   `<!--~ btn:verified, foo:ambient, bar:undefined -->`; cycles, diamonds, missing target later created via
@@ -145,6 +161,9 @@ kind) and the completion handler (hard-codes HTML).
 
 - Selector roles: compound/descendant/negated, shown in hover and used to refine verdict labels.
 - "Why doesn't this apply" (specificity and order) for static HTML only; partial for templates.
+  css-variable-lsp (Rust) already does cascade sorting, specificity calculation and a lightweight HTML
+  scanner for selector matching for CSS variables: read its `specificity` and `dom_tree` modules for the
+  approach. It is GPL-3.0, so read for ideas; do not copy code.
 - Colour hints: see section 5.
 
 ### Stage F: polish
@@ -179,6 +198,9 @@ Two separate LSP mechanisms:
   `var(--x)` needs the graph to resolve; modern colour syntax needs a parser; a class with several colour
   declarations needs a policy (swatch only when unambiguous). Extraction lives in the CSS handler's
   output; display is language-neutral core.
+- css-variable-lsp implements a colour provider (hex, rgb, hsl and named colours per its README) with
+  `csscolorparser`; toba/css-lsp lists a broader set (hwb, lab, lch, oklab, oklch) and conversion between
+  formats. Together they define the colour syntaxes worth supporting.
 - Prior art worth reading: `omena-lsp-server` (Rust CSS-modules LSP implementing documentColor for
   variable references; quality unknown).
 
@@ -192,6 +214,8 @@ Two separate LSP mechanisms:
 | **tailwindcss-oxide** (Tailwind v4 scanner) | State-machine extractor of utility *candidates* from any file (Vue, Svelte, ERB, ... pre-processors), `.gitignore`-aware parallel scan, incremental. | **Skip as a dependency.** It finds candidate strings, not class *positions* or attribute context, and is tuned to Tailwind syntax. Idea worth keeping: a cheap text scan for "possible dynamic usages" to warn during rename. Not verified that it is published as a standalone crate. |
 | **lightningcss (values)** | Full CSS value parser. | **Candidate for stage E colour parsing** (parse a declaration value to RGBA). Check wide-gamut coverage then. |
 | **tree-sitter-css / html / svelte / vue grammars** | Used today for CSS. Svelte/Vue grammar crates were stale in the first survey. | Keep CSS. For Svelte/Vue prefer the hand scanner with a dialect switch (a stock HTML parser would not fix Svelte braces either). |
+| **css-variable-lsp** (crates.io, Rust, GPL-3.0) | Language server for CSS custom properties: workspace indexing across CSS and HTML `<style>`/inline styles, `var()` usage tracking, completion, hover, definition, references, rename, diagnostics, colour provider, cascade sorting and specificity, a lightweight DOM scanner. Built on tower-lsp and tokio; parses colours with `csscolorparser`. | **Reference, not a dependency.** It solves the same accuracy problems for variables (cascade, specificity, selector matching, completion context) and its module layout is worth reading. GPL-3.0 rules out copying; async tower-lsp is the ordering risk discussed earlier. Its `csscolorparser` choice is a lighter colour-parser candidate than lightningcss (verify modern syntax coverage before relying on it). |
+| **toba/css-lsp** (GitHub, Go, MIT) | General CSS language server: diagnostics, hover docs, completion, colour picker for hex/named/`rgb()`/`hsl()`/`hwb()`/`lab()`/`lch()`/`oklab()`/`oklch()` with conversion, go-to-definition and references for custom properties, document links for `@import` and `url()`, cross-file custom-property index. | **Not relevant to class names** (it is about properties, values and formatting). Useful as a checklist of modern colour syntaxes for the colour-hint stage and as an example of exposing `@import` edges. |
 | **oxc_parser** | Rust JS/TS/JSX parser with error recovery. | **Likely for stage C** (JSX and `:class` expressions); evaluate against tree-sitter-tsx on half-typed code first. |
 
 Not covered by anything found: bundler-level reachability (which CSS reaches which component). That is

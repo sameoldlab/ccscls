@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use css_class_lsp::css::CssIndexer;
+use css_class_lsp::languages::Language;
 
 #[test]
 fn every_css_fixture_matches_its_annotations() {
@@ -16,13 +16,13 @@ fn every_css_fixture_matches_its_annotations() {
     files.sort();
     assert!(files.len() >= 10, "fixtures missing? found {}", files.len());
 
-    let mut indexer = CssIndexer::new();
+    let mut observer = Observer::new();
     let mut failures = Vec::new();
     for path in &files {
         let src = std::fs::read_to_string(path).unwrap();
         let want = parse_expectations(&src);
         assert!(!want.is_empty(), "{} has no /*~ markers", path.display());
-        let got = describe(&src, &indexer.index(&src));
+        let got = describe(&src, &observer.observe(Language::Css, &src));
         if want != got {
             failures.push(format!(
                 "{}\n{}",
