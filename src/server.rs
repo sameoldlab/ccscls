@@ -168,8 +168,10 @@ impl Server {
             .and_then(|workspace| workspace.did_change_watched_files.as_ref())
             .and_then(|watched| watched.dynamic_registration)
             .unwrap_or(false);
+        let mut workspace = Workspace::new();
+        workspace.set_roots(roots.clone());
         Self {
-            workspace: Workspace::new(),
+            workspace,
             roots,
             can_register_watchers,
             log_enabled: std::env::var_os("CSS_CLASS_LSP_LOG").is_some(),

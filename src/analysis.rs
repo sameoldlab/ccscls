@@ -23,6 +23,11 @@ impl Span {
     pub fn range(self) -> Range<usize> {
         self.start as usize..self.end as usize
     }
+
+    /// The same span moved `offset` bytes later (for text analyzed as a slice of a larger file).
+    pub fn shifted(self, offset: u32) -> Self {
+        Self { start: self.start + offset, end: self.end + offset }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,9 +38,19 @@ pub enum Role {
     Usage,
 }
 
+/// Who can see a definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// A stylesheet that other files can import or link.
+    Shared,
+    /// CSS embedded in a document (`<style>`): only that document sees it.
+    Private,
+}
+
 #[derive(Debug, Clone)]
 pub struct Occurrence {
     pub role: Role,
+    pub scope: Scope,
     /// The unescaped name, as it would be written in an HTML `class` attribute.
     pub name: NameId,
     /// The token exactly as written in the source (escapes intact, no leading `.`).
@@ -47,12 +62,28 @@ pub struct Occurrence {
     pub context_len: u32,
 }
 
+/// A reference from one file to a stylesheet: `<link rel="stylesheet" href>` or `@import`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The specifier as written (`css/site.css`, `https://cdn.example.com/x.css`).
+    pub specifier: NameId,
+    /// Where the specifier text is in the source.
+    pub span: Span,
+    /// What follows the specifier in an `@import` (media query, `layer(..)`,
+    /// `supports(..)`), whitespace-collapsed. `None` when unconditional.
+    pub condition: Option<NameId>,
+}
+
 #[derive(Debug, Default)]
 pub struct FileAnalysis {
     /// Sorted by `name_span.start` once `finish` has run.
     pub occurrences: Vec<Occurrence>,
     /// Flat storage for at-rule chains (outermost first), shared between occurrences.
     pub contexts: Vec<NameId>,
+    pub imports: Vec<Import>,
+    /// True when something that could add CSS to this file is unknown to us
+    /// (a document that loads scripts, or a fragment with no `<head>`).
+    pub open_world: bool,
 }
 
 impl FileAnalysis {
@@ -60,12 +91,21 @@ impl FileAnalysis {
         let context_start = self.context_start_for(context);
         self.occurrences.push(Occurrence {
             role,
+            scope: Scope::Shared,
             name,
             name_span,
             rule_span,
             context_start,
             context_len: context.len() as u32,
         });
+    }
+
+    /// Like `add`, for CSS embedded in a document: only this file sees it.
+    pub fn add_private(&mut self, role: Role, name: NameId, name_span: Span, rule_span: Span, context: &[NameId]) {
+        self.add(role, name, name_span, rule_span, context);
+        if let Some(last) = self.occurrences.last_mut() {
+            last.scope = Scope::Private;
+        }
     }
 
     pub fn context_of(&self, occurrence: &Occurrence) -> &[NameId] {
@@ -139,6 +179,20 @@ mod tests {
         assert_eq!(analysis.occurrence_at(9), Some(1));
         assert_eq!(analysis.occurrence_at(10), None);
         assert_eq!(FileAnalysis::default().occurrence_at(0), None);
+    }
+
+    #[test]
+    fn spans_shift_and_private_adds_are_marked() {
+        let span = Span { start: 2, end: 5 };
+        assert_eq!(span.shifted(10), Span { start: 12, end: 15 });
+
+        let mut strings = Strings::new();
+        let name = strings.intern("x");
+        let mut analysis = FileAnalysis::default();
+        analysis.add(Role::Definition, name, span, span, &[]);
+        analysis.add_private(Role::Definition, name, span, span, &[]);
+        let scopes: Vec<Scope> = analysis.occurrences.iter().map(|occurrence| occurrence.scope).collect();
+        assert_eq!(scopes, [Scope::Shared, Scope::Private]);
     }
 
     #[test]

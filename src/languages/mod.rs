@@ -9,7 +9,7 @@
 pub mod css;
 pub mod html;
 
-use crate::analysis::{FileAnalysis, Span};
+use crate::analysis::{FileAnalysis, Import, Role, Span};
 use crate::strings::Strings;
 use std::path::Path;
 
@@ -28,6 +28,14 @@ pub struct ClassContext {
     pub replace: Span,
     /// Token text before the cursor.
     pub prefix: Span,
+}
+
+/// A stretch of a file written in another language (CSS inside `<style>`).
+/// The handler that finds it reports it; the core analyzes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+    pub language: Language,
+    pub span: Span,
 }
 
 /// Per-language parsing state that is expensive to create and reused across files.
@@ -73,13 +81,52 @@ impl Language {
             .collect()
     }
 
-    /// Fill `out` with this file's occurrences, interning names into `strings`.
+    /// Fill `out` with this file's occurrences and imports, interning names into
+    /// `strings`. Embedded regions are analyzed here and their definitions are
+    /// marked private to the file.
     pub fn analyze(self, engines: &mut Engines, text: &str, strings: &mut Strings, out: &mut FileAnalysis) {
-        match self {
-            Self::Css => css::analyze(&mut engines.css, text, strings, out),
+        let regions = match self {
+            Self::Css => {
+                css::analyze(&mut engines.css, text, strings, out);
+                Vec::new()
+            }
             Self::Html => html::analyze(text, strings, out),
+        };
+        for region in regions {
+            region
+                .language
+                .analyze_region(engines, text, region.span, strings, out);
         }
         out.finish();
+    }
+
+    /// Analyze `text[span]` as this language and merge the result into `out`,
+    /// with spans moved back into the whole file's coordinates.
+    fn analyze_region(self, engines: &mut Engines, text: &str, span: Span, strings: &mut Strings, out: &mut FileAnalysis) {
+        let Some(region_text) = text.get(span.range()) else {
+            return;
+        };
+        let mut inner = FileAnalysis::default();
+        match self {
+            Self::Css => css::analyze(&mut engines.css, region_text, strings, &mut inner),
+            // Markup nested inside another file is not supported.
+            Self::Html => return,
+        }
+        for occurrence in &inner.occurrences {
+            let name_span = occurrence.name_span.shifted(span.start);
+            let rule_span = occurrence.rule_span.shifted(span.start);
+            let context = inner.context_of(occurrence);
+            match occurrence.role {
+                Role::Definition => out.add_private(occurrence.role, occurrence.name, name_span, rule_span, context),
+                Role::Usage => out.add(occurrence.role, occurrence.name, name_span, rule_span, context),
+            }
+        }
+        for import in &inner.imports {
+            out.imports.push(Import {
+                span: import.span.shifted(span.start),
+                ..import.clone()
+            });
+        }
     }
 
     /// If `offset` is where a class name is being typed, the token being edited.
@@ -134,6 +181,37 @@ mod tests {
     #[test]
     fn watch_globs_cover_every_extension() {
         assert_eq!(Language::watch_globs(), ["**/*.css", "**/*.html", "**/*.htm"]);
+    }
+
+    #[test]
+    fn style_blocks_become_private_definitions_at_the_right_offsets() {
+        let source = "<p class=\"x\">\n<style>\n.only { }\n@import \"extra.css\";\n</style>";
+        let mut engines = Engines::new();
+        let mut strings = Strings::new();
+        let mut out = FileAnalysis::default();
+        Language::Html.analyze(&mut engines, source, &mut strings, &mut out);
+
+        let found: Vec<(Role, crate::analysis::Scope, &str, &str)> = out
+            .occurrences
+            .iter()
+            .map(|occurrence| {
+                (
+                    occurrence.role,
+                    occurrence.scope,
+                    strings.get(occurrence.name),
+                    source.get(occurrence.name_span.range()).unwrap_or("?"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (Role::Usage, crate::analysis::Scope::Shared, "x", "x"),
+                (Role::Definition, crate::analysis::Scope::Private, "only", "only"),
+            ]
+        );
+        let imports: Vec<&str> = out.imports.iter().map(|import| source.get(import.span.range()).unwrap_or("?")).collect();
+        assert_eq!(imports, ["extra.css"]);
     }
 
     #[test]

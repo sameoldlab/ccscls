@@ -10,13 +10,18 @@
 //! `NameLists` holds each list's head. Re-indexing a file unlinks its old
 //! occurrences in constant time each, with no per-name vectors to maintain.
 
-use crate::analysis::{FileAnalysis, Occurrence, Role};
+mod visibility;
+
+use crate::analysis::{FileAnalysis, Occurrence, Role, Scope};
 use crate::languages::{Engines, Language};
 use crate::line_index::LineIndex;
 use crate::strings::{NameId, Strings};
 use crate::uri::file_key;
 use lsp_types::Uri;
 use rustc_hash::FxHashMap;
+use std::path::PathBuf;
+
+pub use visibility::{Classification, Reach, Verdict};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FileId {
@@ -74,8 +79,11 @@ pub struct Workspace {
     slots: Vec<Slot>,
     free_slots: Vec<u32>,
     ids: FxHashMap<String, FileId>,
-    /// Indexed by `NameId`.
+    /// Indexed by `NameId`. Private definitions (CSS embedded in a document)
+    /// are not in these lists: only their own file can see them.
     names: Vec<NameLists>,
+    /// Workspace folders, for resolving root-relative URLs like `/css/site.css`.
+    roots: Vec<PathBuf>,
 }
 
 impl Default for Workspace {
@@ -93,6 +101,7 @@ impl Workspace {
             free_slots: Vec::new(),
             ids: FxHashMap::default(),
             names: Vec::new(),
+            roots: Vec::new(),
         }
     }
 
@@ -150,6 +159,11 @@ impl Workspace {
             return None;
         }
         slot.entry.as_ref()
+    }
+
+    /// The current handle for the file with this key.
+    pub fn file_id(&self, key: &str) -> Option<FileId> {
+        self.ids.get(key).copied().filter(|id| self.file(*id).is_some())
     }
 
     pub fn file_by_key(&self, key: &str) -> Option<&FileEntry> {
@@ -275,6 +289,9 @@ impl Workspace {
         let Some((_, occurrence)) = self.resolve(id) else {
             return;
         };
+        if occurrence.role == Role::Definition && occurrence.scope == Scope::Private {
+            return;
+        }
         let (role, name) = (occurrence.role, occurrence.name);
         if self.names.len() <= name.index() {
             self.names.resize(name.index() + 1, NameLists::default());
@@ -296,6 +313,9 @@ impl Workspace {
         let Some((_, occurrence)) = self.resolve(id) else {
             return;
         };
+        if occurrence.role == Role::Definition && occurrence.scope == Scope::Private {
+            return;
+        }
         let (role, name) = (occurrence.role, occurrence.name);
         let Some(links) = self.links_of(id) else {
             return;
@@ -351,7 +371,9 @@ impl Workspace {
                 for (&_, &file) in self.ids.iter() {
                     let entry = self.file(file).expect("live file");
                     for (index, occurrence) in entry.analysis.occurrences.iter().enumerate() {
-                        if occurrence.name == name && occurrence.role == role {
+                        let is_private_definition =
+                            occurrence.role == Role::Definition && occurrence.scope == Scope::Private;
+                        if occurrence.name == name && occurrence.role == role && !is_private_definition {
                             scanned.push(OccurrenceId { file, index: index as u32 });
                         }
                     }
@@ -410,6 +432,22 @@ mod tests {
 
         workspace.upsert(uri("file:///w/i.html"), r#"<p class="y">"#.into(), Language::Html, None);
         assert_eq!(names_of(&workspace, Role::Usage, "x"), 0);
+        workspace.assert_consistent();
+    }
+
+    #[test]
+    fn private_definitions_stay_out_of_the_shared_lists() {
+        let mut workspace = Workspace::new();
+        let page = "<style>.only { }</style><p class=\"only\">";
+        workspace.upsert(uri("file:///w/page.html"), page.into(), Language::Html, None);
+        assert_eq!(names_of(&workspace, Role::Definition, "only"), 0);
+        assert_eq!(names_of(&workspace, Role::Usage, "only"), 1);
+        assert!(workspace.class_names().is_empty());
+        workspace.assert_consistent();
+
+        workspace.upsert(uri("file:///w/page.html"), "<p>".into(), Language::Html, None);
+        workspace.assert_consistent();
+        workspace.remove("/w/page.html");
         workspace.assert_consistent();
     }
 

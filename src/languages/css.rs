@@ -4,9 +4,10 @@
 //! (`.a.b:hover > .c`, `:is(.x, .y)`, `:not(.z)`, nested `&.q`, ...). They are
 //! all indexed because rename must touch each one.
 
-use crate::analysis::{FileAnalysis, Role, Span};
+use crate::analysis::{FileAnalysis, Import, Role, Span};
 use crate::strings::{NameId, Strings};
 use std::borrow::Cow;
+use std::ops::Range;
 use tree_sitter::{Node, Parser};
 
 pub struct CssIndexer {
@@ -83,6 +84,9 @@ fn collect(root: Node, src: &str, strings: &mut Strings, scratch: &mut Vec<NameI
         if is_class_token {
             add_definition(node, src, strings, scratch, out);
         }
+        if matches!(node.kind(), "import_statement" | "at_rule") {
+            add_import(node, src, strings, out);
+        }
         if cursor.goto_first_child() {
             continue;
         }
@@ -133,6 +137,74 @@ fn add_definition(node: Node, src: &str, strings: &mut Strings, scratch: &mut Ve
     let rule_range = rule_range.unwrap_or_else(|| name_range.clone());
     let name = strings.intern(&unescape_ident(raw));
     out.add(Role::Definition, name, Span::of(name_range), Span::of(rule_range), scratch);
+}
+
+fn add_import(node: Node, src: &str, strings: &mut Strings, out: &mut FileAnalysis) {
+    let Some(text) = src.get(node.byte_range()) else {
+        return;
+    };
+    let Some((specifier_range, remainder)) = parse_import(text) else {
+        return;
+    };
+    let Some(specifier) = text.get(specifier_range.clone()).filter(|specifier| !specifier.is_empty()) else {
+        return;
+    };
+    let start = node.start_byte() + specifier_range.start;
+    let specifier_id = strings.intern(specifier);
+    let condition = if remainder.is_empty() {
+        None
+    } else {
+        Some(strings.intern_collapsed(remainder))
+    };
+    out.imports.push(Import {
+        specifier: specifier_id,
+        span: Span::of(start..start + specifier.len()),
+        condition,
+    });
+}
+
+/// Split `@import "a.css" print;` into the range of the specifier text within
+/// `text` and the remainder (media query, `layer(..)`, `supports(..)`) without
+/// the semicolon. `None` when `text` is not an `@import` with a specifier.
+fn parse_import(text: &str) -> Option<(Range<usize>, &str)> {
+    const KEYWORD_LENGTH: usize = "@import".len();
+    let keyword = text.get(..KEYWORD_LENGTH)?;
+    if !keyword.eq_ignore_ascii_case("@import") {
+        return None;
+    }
+    let after_keyword = text.get(KEYWORD_LENGTH..)?;
+    let body = after_keyword.trim_start();
+    let body_start = KEYWORD_LENGTH + (after_keyword.len() - body.len());
+    let first = body.chars().next()?;
+
+    let (specifier_range, remainder_start) = if first == '"' || first == '\'' {
+        let closing = body.get(1..)?.find(first)? + 1;
+        (body_start + 1..body_start + closing, closing + 1)
+    } else if body.get(..4).is_some_and(|prefix| prefix.eq_ignore_ascii_case("url(")) {
+        let closing = body.find(')')?;
+        let inner = body.get(4..closing)?;
+        let leading = inner.len() - inner.trim_start().len();
+        let trimmed = inner.trim();
+        let first_char = trimmed.chars().next();
+        let is_quoted = trimmed.len() >= 2
+            && matches!(first_char, Some('"' | '\''))
+            && first_char == trimmed.chars().next_back();
+        let (start, end) = if is_quoted {
+            (4 + leading + 1, 4 + leading + trimmed.len() - 1)
+        } else {
+            (4 + leading, 4 + leading + trimmed.len())
+        };
+        (body_start + start..body_start + end, closing + 1)
+    } else {
+        return None;
+    };
+
+    let remainder = body
+        .get(remainder_start..)?
+        .trim()
+        .trim_end_matches(';')
+        .trim();
+    Some((specifier_range, remainder))
 }
 
 /// `@media (min-width: 600px)` for a `media_statement`: source text up to the
@@ -356,6 +428,60 @@ mod tests {
         // is `x\1F600 ` (with the space). Rename re-inserts a space for it.
         let found = definitions(r".x\1F600 {}");
         assert_eq!(found, vec![("x😀".to_owned(), r"x\1F600 ".to_owned())]);
+    }
+
+    #[test]
+    fn parse_import_splits_specifier_and_condition() {
+        let cases = [
+            (r#"@import "a.css";"#, Some(("a.css", ""))),
+            ("@import url(b.css) screen;", Some(("b.css", "screen"))),
+            (
+                r#"@import url("c.css") layer(base) supports(display: grid);"#,
+                Some(("c.css", "layer(base) supports(display: grid)")),
+            ),
+            ("@import 'd.css' print;", Some(("d.css", "print"))),
+            (r#"@IMPORT "e.css""#, Some(("e.css", ""))),
+            (r#"@import url( "f.css" );"#, Some(("f.css", ""))),
+            ("@import   \"g.css\"   ;", Some(("g.css", ""))),
+            ("@media screen { }", None),
+            ("@import ;", None),
+            ("@import", None),
+            ("@important \"x.css\"", None),
+            ("", None),
+        ];
+        for (source, expected) in cases {
+            let parsed = parse_import(source).map(|(range, remainder)| (&source[range], remainder));
+            assert_eq!(parsed, expected, "source = {source:?}");
+        }
+    }
+
+    #[test]
+    fn imports_are_extracted_with_exact_spans() {
+        let source = "@import \"a.css\";\n@import url(b.css) screen;\n.x { }\n@import 'd.css' print;\n";
+        let mut indexer = CssIndexer::new();
+        let mut strings = Strings::new();
+        let mut out = FileAnalysis::default();
+        analyze(&mut indexer, source, &mut strings, &mut out);
+
+        let found: Vec<(&str, &str, Option<&str>)> = out
+            .imports
+            .iter()
+            .map(|import| {
+                (
+                    strings.get(import.specifier),
+                    source.get(import.span.range()).unwrap_or("?"),
+                    import.condition.map(|condition| strings.get(condition)),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                ("a.css", "a.css", None),
+                ("b.css", "b.css", Some("screen")),
+                ("d.css", "d.css", Some("print")),
+            ]
+        );
     }
 
     #[test]

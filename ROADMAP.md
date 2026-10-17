@@ -17,6 +17,8 @@ Verification state, stated plainly:
   was edited). **They have not been run since.** The first `cargo test` on your machine is the real check.
   One compile error found along the way (`Observed` needed `PartialEq`) was fixed by inspection.
 - The toolchain is no longer used to verify in this environment; if something fails, send the output.
+- After that run, the whole first half of stage B (below) was written. It has **never been compiled**.
+  Expect the first `cargo test` to find typos; the pure parts have unit tests to localise them.
 
 What exists:
 
@@ -40,8 +42,8 @@ What exists:
 - The kak-lsp config snippet in the README is from memory and untested.
 - The string pool never reclaims names (a few bytes per distinct name ever seen).
 - Test code still has single-letter names (`c`, `u`); `src/` is clean.
-- `FileAnalysis` has no imports or embedded-region output yet; stage B adds imports, stage C regions,
-  so no dead code was written ahead of need.
+- Hover and definition on a class inside an inline `<style>` block do not see that block's private
+  definitions yet (the lists only hold shared ones); stage B2 routes those requests through `classify`.
 
 ## 2. The central problem: false positives
 
@@ -121,6 +123,27 @@ kind) and the completion handler (hard-codes HTML).
   pending list.
 
 ### Stage B: provenance, graph and verdicts
+
+**B1 (graph core and verdicts): written, not yet compiled.** The pure parts, with unit tests:
+
+- `Import` (specifier, span, optional condition) and `Scope` (shared or private) in the analysis model;
+  `FileAnalysis` carries `imports` and an `open_world` flag.
+- CSS handler extracts `@import` (string and `url()` forms, with the media/`layer()`/`supports()` remainder).
+- HTML handler extracts `<link rel="stylesheet" href>`, finds `<style>` blocks, and sets `open_world` for
+  fragments, pages with `<script>`, and pages with `<base>`.
+- `Language::analyze` analyzes embedded regions as CSS and marks their definitions private to the file.
+  Private definitions are not in the shared name lists, so they cannot leak to other files.
+- `workspace/visibility.rs`: lazy import resolution (relative, root-relative, `..`, query strings,
+  external URLs unresolvable), breadth-first `reach` with cycle protection, and `classify` returning
+  verified (with chain), ambient (with the files that define it) or undefined, plus `open_world`.
+- LSP behaviour is unchanged by B1.
+
+**B2 (LSP surface and specs): not started.** Completion ranks verified first and labels ambient (never
+drops it), hover shows the chain or "defined in X, no link from here", diagnostics (undefined = warning,
+ambient severity configurable), config (ambient severity, declared edges, ignore globs), and the rewrite
+of `tests/stage4_scoping.rs` plus new LSP-level scenarios annotated with verdicts.
+
+Original plan for the whole stage:
 
 - Per-file import list (raw specifier plus span) extracted by handlers: `<link>`, `@import`, inline `<style>`.
 - Resolution is lazy at query time (join path, look up file ids): nothing to invalidate when files appear

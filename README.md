@@ -75,6 +75,7 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
       html.rs           class attributes -> usages (lexical scanner), cursor context
     src/analysis.rs   language-neutral results: Occurrence, Role, Span, FileAnalysis
     src/workspace.rs  files, generational handles, per-name occurrence lists
+      workspace/visibility.rs   import graph, reach, verified/ambient/undefined verdicts
     src/strings.rs    interned string pool (NameId)
     src/server.rs     LSP loop and handlers, panic boundary
     src/error.rs      Error with a context chain

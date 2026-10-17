@@ -51,7 +51,7 @@ pub fn path_to_uri(path: &Path) -> Option<Uri> {
     Uri::from_str(&encoded).ok()
 }
 
-fn percent_decode(text: &str) -> String {
+pub(crate) fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut cursor = 0;
