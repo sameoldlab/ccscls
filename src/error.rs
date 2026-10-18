@@ -16,7 +16,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { chain: vec![message.into()] }
+        Self {
+            chain: vec![message.into()],
+        }
     }
 
     pub fn context(mut self, message: impl Into<String>) -> Self {
@@ -79,10 +81,18 @@ mod tests {
 
     #[test]
     fn context_wraps_outermost_first() {
-        let failing: std::result::Result<(), std::io::Error> =
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"));
-        let error = failing.context("reading the file").context("starting up").unwrap_err();
-        assert_eq!(error.to_string(), "starting up: reading the file: no such file");
+        let failing: std::result::Result<(), std::io::Error> = Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no such file",
+        ));
+        let error = failing
+            .context("reading the file")
+            .context("starting up")
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "starting up: reading the file: no such file"
+        );
         assert_eq!(error.chain().count(), 3);
     }
 
@@ -97,7 +107,9 @@ mod tests {
     #[test]
     fn lazy_context_only_runs_on_failure() {
         let fine: std::result::Result<u32, std::io::Error> = Ok(1);
-        let value = fine.with_context(|| unreachable!("not called on success")).unwrap();
+        let value = fine
+            .with_context(|| unreachable!("not called on success"))
+            .unwrap();
         assert_eq!(value, 1);
     }
 

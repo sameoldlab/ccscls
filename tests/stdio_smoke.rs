@@ -51,25 +51,43 @@ fn binary_speaks_lsp_over_stdio_and_exits_cleanly() {
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
-    send(&mut stdin, &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
     let init = recv(&mut stdout);
     assert_eq!(init["id"], 1);
     assert_eq!(init["result"]["capabilities"]["hoverProvider"], true);
     assert_eq!(init["result"]["serverInfo"]["name"], "css-class-lsp");
 
-    send(&mut stdin, &json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
-    send(&mut stdin, &json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
-        "uri":"file:///virtual/a.css","languageId":"css","version":1,"text":".btn { color: red }"}}}));
-    send(&mut stdin, &json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{
-        "textDocument":{"uri":"file:///virtual/a.css"},"position":{"line":0,"character":2}}}));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+        "uri":"file:///virtual/a.css","languageId":"css","version":1,"text":".btn { color: red }"}}}),
+    );
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{
+        "textDocument":{"uri":"file:///virtual/a.css"},"position":{"line":0,"character":2}}}),
+    );
     let hover = recv(&mut stdout);
     assert_eq!(hover["id"], 2);
     let text = hover["result"]["contents"]["value"].as_str().unwrap();
     assert!(text.starts_with("**`.btn`** — 1 rule"), "{text}");
 
-    send(&mut stdin, &json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}),
+    );
     let down = recv(&mut stdout);
-    assert_eq!((down["id"].as_i64(), down["result"].is_null()), (Some(3), true));
+    assert_eq!(
+        (down["id"].as_i64(), down["result"].is_null()),
+        (Some(3), true)
+    );
     send(&mut stdin, &json!({"jsonrpc":"2.0","method":"exit"}));
     assert!(child.wait().unwrap().success());
 }

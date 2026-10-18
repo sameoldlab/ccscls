@@ -8,10 +8,27 @@ fn main() {
     fn go(c: &mut tree_sitter::TreeCursor, src: &str, d: usize) {
         loop {
             let n = c.node();
-            let txt: String = src[n.byte_range()].chars().take(30).collect::<String>().replace('\n', "\\n");
-            println!("{}{} [{}..{}] {:?}{}", "  ".repeat(d), n.kind(), n.start_byte(), n.end_byte(), txt, if n.is_error() {" ERR"} else {""});
-            if c.goto_first_child() { go(c, src, d + 1); c.goto_parent(); }
-            if !c.goto_next_sibling() { break; }
+            let txt: String = src[n.byte_range()]
+                .chars()
+                .take(30)
+                .collect::<String>()
+                .replace('\n', "\\n");
+            println!(
+                "{}{} [{}..{}] {:?}{}",
+                "  ".repeat(d),
+                n.kind(),
+                n.start_byte(),
+                n.end_byte(),
+                txt,
+                if n.is_error() { " ERR" } else { "" }
+            );
+            if c.goto_first_child() {
+                go(c, src, d + 1);
+                c.goto_parent();
+            }
+            if !c.goto_next_sibling() {
+                break;
+            }
         }
     }
     go(&mut cur, &src, 0);

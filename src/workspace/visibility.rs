@@ -132,10 +132,16 @@ impl Workspace {
     /// cannot be resolved makes the result open-world.
     pub fn reach(&self, origin: FileId) -> Reach {
         let Some(origin_entry) = self.file(origin) else {
-            return Reach { visits: Vec::new(), open_world: true };
+            return Reach {
+                visits: Vec::new(),
+                open_world: true,
+            };
         };
         let mut open_world = origin_entry.analysis.open_world;
-        let mut visits = vec![Visit { file: origin, parent: None }];
+        let mut visits = vec![Visit {
+            file: origin,
+            parent: None,
+        }];
         let mut seen = FxHashSet::default();
         seen.insert(origin);
 
@@ -147,7 +153,10 @@ impl Workspace {
                     match self.resolve_import(entry, import) {
                         Some(target) => {
                             if seen.insert(target) {
-                                visits.push(Visit { file: target, parent: Some(next) });
+                                visits.push(Visit {
+                                    file: target,
+                                    parent: Some(next),
+                                });
                             }
                         }
                         None => open_world = true,
@@ -195,7 +204,11 @@ impl Workspace {
         // Occurrences are ordered by file, so equal files are adjacent.
         let mut defined_in: Vec<FileId> = definitions.iter().map(|id| id.file).collect();
         defined_in.dedup();
-        let verdict = if defined_in.is_empty() { Verdict::Undefined } else { Verdict::Ambient };
+        let verdict = if defined_in.is_empty() {
+            Verdict::Undefined
+        } else {
+            Verdict::Ambient
+        };
         Classification {
             verdict,
             chain: Vec::new(),
@@ -237,12 +250,20 @@ impl Workspace {
             .map(|(name, (visit_index, rule_count))| Candidate {
                 name: *name,
                 rule_count: *rule_count,
-                provided_by: visible.reach.visits.get(*visit_index).map(|visit| visit.file),
+                provided_by: visible
+                    .reach
+                    .visits
+                    .get(*visit_index)
+                    .map(|visit| visit.file),
             })
             .collect();
         for (name, rule_count) in self.class_names() {
             if !visible.contains(name) {
-                candidates.push(Candidate { name, rule_count, provided_by: None });
+                candidates.push(Candidate {
+                    name,
+                    rule_count,
+                    provided_by: None,
+                });
             }
         }
         candidates
@@ -258,20 +279,38 @@ impl Workspace {
                 if occurrence.role != Role::Usage {
                     continue;
                 }
-                let id = OccurrenceId { file: origin, index: index as u32 };
+                let id = OccurrenceId {
+                    file: origin,
+                    index: index as u32,
+                };
                 if visible.contains(occurrence.name) {
-                    items.push(UsageVerdict { occurrence: id, verdict: Verdict::Verified, defined_in: Vec::new() });
+                    items.push(UsageVerdict {
+                        occurrence: id,
+                        verdict: Verdict::Verified,
+                        defined_in: Vec::new(),
+                    });
                     continue;
                 }
                 let defined_in = defining
                     .entry(occurrence.name)
                     .or_insert_with(|| self.defining_files(occurrence.name))
                     .clone();
-                let verdict = if defined_in.is_empty() { Verdict::Undefined } else { Verdict::Ambient };
-                items.push(UsageVerdict { occurrence: id, verdict, defined_in });
+                let verdict = if defined_in.is_empty() {
+                    Verdict::Undefined
+                } else {
+                    Verdict::Ambient
+                };
+                items.push(UsageVerdict {
+                    occurrence: id,
+                    verdict,
+                    defined_in,
+                });
             }
         }
-        UsageVerdicts { items, open_world: visible.open_world() }
+        UsageVerdicts {
+            items,
+            open_world: visible.open_world(),
+        }
     }
 
     /// Definitions of `name` that an editor should offer from `origin`: every
@@ -284,7 +323,10 @@ impl Workspace {
                     && occurrence.scope == Scope::Private
                     && occurrence.name == name;
                 if is_own_private_definition {
-                    found.push(OccurrenceId { file: origin, index: index as u32 });
+                    found.push(OccurrenceId {
+                        file: origin,
+                        index: index as u32,
+                    });
                 }
             }
         }
@@ -317,7 +359,11 @@ impl Workspace {
         let decoded = percent_decode(specifier);
 
         let candidates: Vec<PathBuf> = match decoded.strip_prefix('/') {
-            Some(root_relative) => self.roots.iter().map(|root| root.join(root_relative)).collect(),
+            Some(root_relative) => self
+                .roots
+                .iter()
+                .map(|root| root.join(root_relative))
+                .collect(),
             None => {
                 let importer_path = uri_to_path(&importer.uri)?;
                 vec![importer_path.parent()?.join(&decoded)]
@@ -374,7 +420,10 @@ mod tests {
 
     fn classify_name(workspace: &Workspace, page_path: &str, name: &str) -> Classification {
         let origin = workspace.file_id(page_path).expect("page is indexed");
-        let name = workspace.strings.lookup(name).expect("name appears somewhere");
+        let name = workspace
+            .strings
+            .lookup(name)
+            .expect("name appears somewhere");
         workspace.classify(origin, name)
     }
 
@@ -402,7 +451,10 @@ mod tests {
         let workspace = site_with_one_page(&link("css/site.css"), r#"<p class="btn missing">"#);
         let btn = classify_name(&workspace, "/w/index.html", "btn");
         assert_eq!(btn.verdict, Verdict::Verified);
-        assert_eq!(paths(&workspace, &btn.chain), ["/w/index.html", "/w/css/site.css"]);
+        assert_eq!(
+            paths(&workspace, &btn.chain),
+            ["/w/index.html", "/w/css/site.css"]
+        );
         assert!(!btn.open_world);
 
         let missing = classify_name(&workspace, "/w/index.html", "missing");
@@ -415,7 +467,11 @@ mod tests {
         let mut workspace = Workspace::new();
         add_css(&mut workspace, "/w/css/base.css", ".btn { }");
         add_css(&mut workspace, "/w/css/main.css", "@import \"base.css\";");
-        add_html(&mut workspace, "/w/index.html", &page(&link("css/main.css"), r#"<p class="btn">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&link("css/main.css"), r#"<p class="btn">"#),
+        );
         let btn = classify_name(&workspace, "/w/index.html", "btn");
         assert_eq!(btn.verdict, Verdict::Verified);
         assert_eq!(
@@ -432,7 +488,10 @@ mod tests {
         assert_eq!(card.verdict, Verdict::Ambient);
         assert!(card.chain.is_empty());
         assert_eq!(paths(&workspace, &card.defined_in), ["/w/css/other.css"]);
-        assert!(!card.open_world, "a closed document can say 'not linked' with confidence");
+        assert!(
+            !card.open_world,
+            "a closed document can say 'not linked' with confidence"
+        );
     }
 
     #[test]
@@ -443,14 +502,22 @@ mod tests {
             "/w/a.html",
             &page("<style>.only { }</style>", r#"<p class="only">"#),
         );
-        add_html(&mut workspace, "/w/b.html", &page("", r#"<p class="only">"#));
+        add_html(
+            &mut workspace,
+            "/w/b.html",
+            &page("", r#"<p class="only">"#),
+        );
 
         let own = classify_name(&workspace, "/w/a.html", "only");
         assert_eq!(own.verdict, Verdict::Verified);
         assert_eq!(paths(&workspace, &own.chain), ["/w/a.html"]);
 
         let other = classify_name(&workspace, "/w/b.html", "only");
-        assert_eq!(other.verdict, Verdict::Undefined, "private CSS must not be ambient elsewhere");
+        assert_eq!(
+            other.verdict,
+            Verdict::Undefined,
+            "private CSS must not be ambient elsewhere"
+        );
     }
 
     #[test]
@@ -458,12 +525,22 @@ mod tests {
         let mut workspace = Workspace::new();
         add_css(&mut workspace, "/w/a.css", "@import \"b.css\";\n.a { }");
         add_css(&mut workspace, "/w/b.css", "@import \"a.css\";\n.b { }");
-        add_html(&mut workspace, "/w/index.html", &page(&link("a.css"), r#"<p class="a b">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&link("a.css"), r#"<p class="a b">"#),
+        );
 
         let class_a = classify_name(&workspace, "/w/index.html", "a");
-        assert_eq!(paths(&workspace, &class_a.chain), ["/w/index.html", "/w/a.css"]);
+        assert_eq!(
+            paths(&workspace, &class_a.chain),
+            ["/w/index.html", "/w/a.css"]
+        );
         let class_b = classify_name(&workspace, "/w/index.html", "b");
-        assert_eq!(paths(&workspace, &class_b.chain), ["/w/index.html", "/w/a.css", "/w/b.css"]);
+        assert_eq!(
+            paths(&workspace, &class_b.chain),
+            ["/w/index.html", "/w/a.css", "/w/b.css"]
+        );
     }
 
     #[test]
@@ -473,12 +550,19 @@ mod tests {
         add_css(&mut workspace, "/w/b.css", "@import \"c.css\";\n.b { }");
         add_css(&mut workspace, "/w/c.css", ".x { }");
         let head = format!("{}{}", link("a.css"), link("b.css"));
-        add_html(&mut workspace, "/w/index.html", &page(&head, r#"<p class="x">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&head, r#"<p class="x">"#),
+        );
 
         let origin = workspace.file_id("/w/index.html").expect("page is indexed");
         assert_eq!(workspace.reach(origin).visited_files().len(), 4);
         let class_x = classify_name(&workspace, "/w/index.html", "x");
-        assert_eq!(paths(&workspace, &class_x.chain), ["/w/index.html", "/w/a.css", "/w/c.css"]);
+        assert_eq!(
+            paths(&workspace, &class_x.chain),
+            ["/w/index.html", "/w/a.css", "/w/c.css"]
+        );
     }
 
     #[test]
@@ -486,7 +570,11 @@ mod tests {
         let mut workspace = Workspace::new();
         add_css(&mut workspace, "/w/css/site.css", ".btn { }");
         let head = link("https://cdn.example.com/x.css");
-        add_html(&mut workspace, "/w/index.html", &page(&head, r#"<p class="btn">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&head, r#"<p class="btn">"#),
+        );
         let btn = classify_name(&workspace, "/w/index.html", "btn");
         assert_eq!(btn.verdict, Verdict::Ambient);
         assert!(btn.open_world, "an unknown stylesheet might define it");
@@ -497,7 +585,11 @@ mod tests {
         let mut workspace = Workspace::new();
         let css = "@import url(\"https://fonts.googleapis.com/css?family=Foo\");\n.btn { }";
         add_css(&mut workspace, "/w/css/site.css", css);
-        add_html(&mut workspace, "/w/index.html", &page(&link("css/site.css"), r#"<p class="btn">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&link("css/site.css"), r#"<p class="btn">"#),
+        );
         let btn = classify_name(&workspace, "/w/index.html", "btn");
         assert_eq!(btn.verdict, Verdict::Verified);
         assert!(btn.open_world);
@@ -506,7 +598,11 @@ mod tests {
     #[test]
     fn creating_the_target_later_resolves_the_link_without_any_invalidation() {
         let mut workspace = Workspace::new();
-        add_html(&mut workspace, "/w/index.html", &page(&link("css/late.css"), r#"<p class="late">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&link("css/late.css"), r#"<p class="late">"#),
+        );
         let before = classify_name(&workspace, "/w/index.html", "late");
         assert_eq!(before.verdict, Verdict::Undefined);
         assert!(before.open_world);
@@ -520,7 +616,10 @@ mod tests {
     #[test]
     fn removing_the_target_degrades_the_verdict() {
         let mut workspace = site_with_one_page(&link("css/site.css"), r#"<p class="btn">"#);
-        assert_eq!(classify_name(&workspace, "/w/index.html", "btn").verdict, Verdict::Verified);
+        assert_eq!(
+            classify_name(&workspace, "/w/index.html", "btn").verdict,
+            Verdict::Verified
+        );
         assert!(workspace.remove("/w/css/site.css"));
         let after = classify_name(&workspace, "/w/index.html", "btn");
         assert_eq!(after.verdict, Verdict::Undefined);
@@ -535,9 +634,15 @@ mod tests {
         add_html(&mut workspace, "/w/fragment.html", &fragment);
         let fragment_verdict = classify_name(&workspace, "/w/fragment.html", "btn");
         assert_eq!(fragment_verdict.verdict, Verdict::Verified);
-        assert!(fragment_verdict.open_world, "a partial may get CSS from the page around it");
+        assert!(
+            fragment_verdict.open_world,
+            "a partial may get CSS from the page around it"
+        );
 
-        let scripted = page(&link("css/site.css"), "<script src=\"app.js\"></script><p class=\"btn\">");
+        let scripted = page(
+            &link("css/site.css"),
+            "<script src=\"app.js\"></script><p class=\"btn\">",
+        );
         add_html(&mut workspace, "/w/scripted.html", &scripted);
         let scripted_verdict = classify_name(&workspace, "/w/scripted.html", "btn");
         assert!(scripted_verdict.open_world, "a script can add stylesheets");
@@ -554,7 +659,11 @@ mod tests {
             ("/w/pages/query.html", "../css/site.css?v=3#top"),
             ("/w/pages/dot.html", "./../css/./site.css"),
         ] {
-            add_html(&mut workspace, path, &page(&link(href), r#"<p class="btn">"#));
+            add_html(
+                &mut workspace,
+                path,
+                &page(&link(href), r#"<p class="btn">"#),
+            );
             let btn = classify_name(&workspace, path, "btn");
             assert_eq!(btn.verdict, Verdict::Verified, "href = {href}");
             assert!(!btn.open_world, "href = {href}");
@@ -565,9 +674,15 @@ mod tests {
     fn links_that_are_not_stylesheets_do_not_count() {
         let mut workspace = Workspace::new();
         let head = r#"<link rel="icon" href="favicon.ico">"#;
-        add_html(&mut workspace, "/w/index.html", &page(head, r#"<p class="x">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(head, r#"<p class="x">"#),
+        );
         let origin = workspace.file_id("/w/index.html").expect("page is indexed");
-        let imports = workspace.file(origin).map_or(usize::MAX, |entry| entry.analysis.imports.len());
+        let imports = workspace
+            .file(origin)
+            .map_or(usize::MAX, |entry| entry.analysis.imports.len());
         assert_eq!(imports, 0);
         assert!(!classify_name(&workspace, "/w/index.html", "x").open_world);
     }
@@ -575,26 +690,45 @@ mod tests {
     #[test]
     fn completion_candidates_split_verified_from_ambient() {
         let mut workspace = Workspace::new();
-        add_css(&mut workspace, "/w/css/site.css", ".btn { }\n.btn:hover { }");
+        add_css(
+            &mut workspace,
+            "/w/css/site.css",
+            ".btn { }\n.btn:hover { }",
+        );
         add_css(&mut workspace, "/w/css/other.css", ".card { }\n.btn { }");
-        add_html(&mut workspace, "/w/index.html", &page(&link("css/site.css"), r#"<p class="btn">"#));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(&link("css/site.css"), r#"<p class="btn">"#),
+        );
         let origin = workspace.file_id("/w/index.html").expect("page is indexed");
 
         let mut found: Vec<(String, bool, u32)> = workspace
             .completion_candidates(origin)
             .iter()
             .map(|candidate| {
-                (workspace.name(candidate.name).to_owned(), candidate.provided_by.is_some(), candidate.rule_count)
+                (
+                    workspace.name(candidate.name).to_owned(),
+                    candidate.provided_by.is_some(),
+                    candidate.rule_count,
+                )
             })
             .collect();
         found.sort();
-        assert_eq!(found, vec![("btn".to_owned(), true, 2), ("card".to_owned(), false, 1)]);
+        assert_eq!(
+            found,
+            vec![("btn".to_owned(), true, 2), ("card".to_owned(), false, 1)]
+        );
     }
 
     #[test]
     fn completion_candidates_include_the_pages_own_private_names_only_for_that_page() {
         let mut workspace = Workspace::new();
-        add_html(&mut workspace, "/w/a.html", &page("<style>.only { }</style>", ""));
+        add_html(
+            &mut workspace,
+            "/w/a.html",
+            &page("<style>.only { }</style>", ""),
+        );
         add_html(&mut workspace, "/w/b.html", &page("", ""));
         let names_for = |path: &str| -> Vec<String> {
             let origin = workspace.file_id(path).expect("page is indexed");
@@ -614,7 +748,14 @@ mod tests {
         add_css(&mut workspace, "/w/css/site.css", ".btn { }");
         add_css(&mut workspace, "/w/css/other.css", ".card { }");
         let body = r#"<p class="btn card ghost only">"#;
-        add_html(&mut workspace, "/w/index.html", &page(&format!("{}<style>.only {{ }}</style>", link("css/site.css")), body));
+        add_html(
+            &mut workspace,
+            "/w/index.html",
+            &page(
+                &format!("{}<style>.only {{ }}</style>", link("css/site.css")),
+                body,
+            ),
+        );
         let origin = workspace.file_id("/w/index.html").expect("page is indexed");
 
         let verdicts = workspace.usage_verdicts(origin);
@@ -623,7 +764,12 @@ mod tests {
         for item in &verdicts.items {
             let (_, occurrence) = workspace.resolve(item.occurrence).expect("usage resolves");
             let single = workspace.classify(origin, occurrence.name);
-            assert_eq!(item.verdict, single.verdict, "name = {}", workspace.name(occurrence.name));
+            assert_eq!(
+                item.verdict,
+                single.verdict,
+                "name = {}",
+                workspace.name(occurrence.name)
+            );
             assert_eq!(item.defined_in, single.defined_in);
         }
         let by_name: Vec<(String, Verdict)> = verdicts
@@ -649,7 +795,11 @@ mod tests {
     fn definitions_visible_to_adds_only_the_origins_private_ones() {
         let mut workspace = Workspace::new();
         add_css(&mut workspace, "/w/css/site.css", ".only { }");
-        add_html(&mut workspace, "/w/a.html", &page("<style>.only { }</style>", ""));
+        add_html(
+            &mut workspace,
+            "/w/a.html",
+            &page("<style>.only { }</style>", ""),
+        );
         add_html(&mut workspace, "/w/b.html", &page("", ""));
         let name = workspace.name_id("only").expect("interned");
         let a = workspace.file_id("/w/a.html").expect("indexed");
@@ -660,7 +810,10 @@ mod tests {
 
     #[test]
     fn paths_normalize_without_touching_the_file_system() {
-        assert_eq!(normalize_path(Path::new("/w/pages/../css/./x.css")), PathBuf::from("/w/css/x.css"));
+        assert_eq!(
+            normalize_path(Path::new("/w/pages/../css/./x.css")),
+            PathBuf::from("/w/css/x.css")
+        );
         assert_eq!(normalize_path(Path::new("/../x")), PathBuf::from("/x"));
         assert_eq!(normalize_path(Path::new("/w//a")), PathBuf::from("/w/a"));
     }

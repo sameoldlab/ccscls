@@ -25,9 +25,21 @@ fn every_html_fixture_matches_its_annotations() {
         if want != got {
             let fmt = |e: &Expected| format!("L{} {}", e.line + 1, e.raw);
             let mut d = Vec::new();
-            d.extend(want.iter().filter(|e| !got.contains(e)).map(|e| format!("  - {}", fmt(e))));
-            d.extend(got.iter().filter(|e| !want.contains(e)).map(|e| format!("  + {}", fmt(e))));
-            failures.push(format!("{}\n{}", path.file_name().unwrap().to_string_lossy(), d.join("\n")));
+            d.extend(
+                want.iter()
+                    .filter(|e| !got.contains(e))
+                    .map(|e| format!("  - {}", fmt(e))),
+            );
+            d.extend(
+                got.iter()
+                    .filter(|e| !want.contains(e))
+                    .map(|e| format!("  + {}", fmt(e))),
+            );
+            failures.push(format!(
+                "{}\n{}",
+                path.file_name().unwrap().to_string_lossy(),
+                d.join("\n")
+            ));
         }
     }
     assert!(failures.is_empty(), "\n{}\n", failures.join("\n\n"));

@@ -158,7 +158,9 @@ mod tests {
     #[test]
     fn survives_growth_and_unicode() {
         let mut strings = Strings::new();
-        let ids: Vec<NameId> = (0..5000).map(|number| strings.intern(&format!("class-{number}-日本語"))).collect();
+        let ids: Vec<NameId> = (0..5000)
+            .map(|number| strings.intern(&format!("class-{number}-日本語")))
+            .collect();
         for (number, id) in ids.iter().enumerate() {
             assert_eq!(strings.get(*id), format!("class-{number}-日本語"));
             assert_eq!(strings.lookup(&format!("class-{number}-日本語")), Some(*id));

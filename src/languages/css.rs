@@ -28,7 +28,11 @@ impl CssIndexer {
     pub fn new() -> Self {
         let mut parser = Parser::new();
         match parser.set_language(&tree_sitter_css::LANGUAGE.into()) {
-            Ok(()) => Self { parser: Some(parser), load_error: None, context_scratch: Vec::new() },
+            Ok(()) => Self {
+                parser: Some(parser),
+                load_error: None,
+                context_scratch: Vec::new(),
+            },
             Err(error) => Self {
                 parser: None,
                 load_error: Some(error.to_string()),
@@ -45,8 +49,17 @@ impl CssIndexer {
 }
 
 /// Never fails: broken CSS yields whatever classes could be recovered.
-pub(super) fn analyze(indexer: &mut CssIndexer, src: &str, strings: &mut Strings, out: &mut FileAnalysis) {
-    let CssIndexer { parser, context_scratch, .. } = indexer;
+pub(super) fn analyze(
+    indexer: &mut CssIndexer,
+    src: &str,
+    strings: &mut Strings,
+    out: &mut FileAnalysis,
+) {
+    let CssIndexer {
+        parser,
+        context_scratch,
+        ..
+    } = indexer;
     let Some(parser) = parser.as_mut() else {
         return;
     };
@@ -75,12 +88,20 @@ pub fn mask_non_ascii(src: &str) -> Cow<'_, str> {
     Cow::Owned(masked)
 }
 
-fn collect(root: Node, src: &str, strings: &mut Strings, scratch: &mut Vec<NameId>, out: &mut FileAnalysis) {
+fn collect(
+    root: Node,
+    src: &str,
+    strings: &mut Strings,
+    scratch: &mut Vec<NameId>,
+    out: &mut FileAnalysis,
+) {
     let mut cursor = root.walk();
     'walk: loop {
         let node = cursor.node();
         let is_class_token = node.kind() == "class_name"
-            && node.parent().is_some_and(|parent| parent.kind() == "class_selector");
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "class_selector");
         if is_class_token {
             add_definition(node, src, strings, scratch, out);
         }
@@ -101,7 +122,13 @@ fn collect(root: Node, src: &str, strings: &mut Strings, scratch: &mut Vec<NameI
     }
 }
 
-fn add_definition(node: Node, src: &str, strings: &mut Strings, scratch: &mut Vec<NameId>, out: &mut FileAnalysis) {
+fn add_definition(
+    node: Node,
+    src: &str,
+    strings: &mut Strings,
+    scratch: &mut Vec<NameId>,
+    out: &mut FileAnalysis,
+) {
     if node.is_missing() || node.byte_range().is_empty() {
         return;
     }
@@ -136,7 +163,13 @@ fn add_definition(node: Node, src: &str, strings: &mut Strings, scratch: &mut Ve
 
     let rule_range = rule_range.unwrap_or_else(|| name_range.clone());
     let name = strings.intern(&unescape_ident(raw));
-    out.add(Role::Definition, name, Span::of(name_range), Span::of(rule_range), scratch);
+    out.add(
+        Role::Definition,
+        name,
+        Span::of(name_range),
+        Span::of(rule_range),
+        scratch,
+    );
 }
 
 fn add_import(node: Node, src: &str, strings: &mut Strings, out: &mut FileAnalysis) {
@@ -146,7 +179,10 @@ fn add_import(node: Node, src: &str, strings: &mut Strings, out: &mut FileAnalys
     let Some((specifier_range, remainder)) = parse_import(text) else {
         return;
     };
-    let Some(specifier) = text.get(specifier_range.clone()).filter(|specifier| !specifier.is_empty()) else {
+    let Some(specifier) = text
+        .get(specifier_range.clone())
+        .filter(|specifier| !specifier.is_empty())
+    else {
         return;
     };
     let start = node.start_byte() + specifier_range.start;
@@ -180,7 +216,10 @@ fn parse_import(text: &str) -> Option<(Range<usize>, &str)> {
     let (specifier_range, remainder_start) = if first == '"' || first == '\'' {
         let closing = body.get(1..)?.find(first)? + 1;
         (body_start + 1..body_start + closing, closing + 1)
-    } else if body.get(..4).is_some_and(|prefix| prefix.eq_ignore_ascii_case("url(")) {
+    } else if body
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("url("))
+    {
         let closing = body.find(')')?;
         let inner = body.get(4..closing)?;
         let leading = inner.len() - inner.trim_start().len();
@@ -211,7 +250,9 @@ fn parse_import(text: &str) -> Option<(Range<usize>, &str)> {
 /// block, whitespace-collapsed and interned.
 fn intern_prelude(node: Node, src: &str, strings: &mut Strings) -> Option<NameId> {
     let mut cursor = node.walk();
-    let block = node.children(&mut cursor).find(|child| child.kind() == "block")?;
+    let block = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == "block")?;
     let text = src.get(node.start_byte()..block.start_byte())?;
     Some(strings.intern_collapsed(text))
 }
@@ -262,7 +303,9 @@ pub fn valid_ident_prefix_len(text: &str) -> usize {
         if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii() {
             end = offset + ch.len_utf8();
         } else if ch == '\\' {
-            let Some(&(_, escaped)) = chars.peek() else { break };
+            let Some(&(_, escaped)) = chars.peek() else {
+                break;
+            };
             if escaped == '\n' || escaped == '\r' {
                 break;
             }
@@ -407,7 +450,11 @@ mod tests {
             ("", ""),
         ];
         for (raw, expected) in cases {
-            assert_eq!(&raw[..valid_ident_prefix_len(raw)], expected, "raw = {raw:?}");
+            assert_eq!(
+                &raw[..valid_ident_prefix_len(raw)],
+                expected,
+                "raw = {raw:?}"
+            );
         }
     }
 
@@ -457,7 +504,8 @@ mod tests {
 
     #[test]
     fn imports_are_extracted_with_exact_spans() {
-        let source = "@import \"a.css\";\n@import url(b.css) screen;\n.x { }\n@import 'd.css' print;\n";
+        let source =
+            "@import \"a.css\";\n@import url(b.css) screen;\n.x { }\n@import 'd.css' print;\n";
         let mut indexer = CssIndexer::new();
         let mut strings = Strings::new();
         let mut out = FileAnalysis::default();
@@ -519,7 +567,19 @@ mod tests {
 
     #[test]
     fn escaping_round_trips_through_unescape() {
-        for name in ["btn", "md:flex", "w-1/2", "10", "2xl:p-4", "-1", "-", "a b", "[x]", "😀", "tab\there"] {
+        for name in [
+            "btn",
+            "md:flex",
+            "w-1/2",
+            "10",
+            "2xl:p-4",
+            "-1",
+            "-",
+            "a b",
+            "[x]",
+            "😀",
+            "tab\there",
+        ] {
             assert_eq!(unescape_ident(&escape_ident(name)), name, "name = {name:?}");
         }
     }

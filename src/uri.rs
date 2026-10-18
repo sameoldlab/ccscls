@@ -86,7 +86,12 @@ mod tests {
             "/tmp/100%/a#b?c.css",
         ] {
             let uri = path_to_uri(Path::new(p)).unwrap();
-            assert_eq!(uri_to_path(&uri).unwrap(), Path::new(p), "uri = {}", uri.as_str());
+            assert_eq!(
+                uri_to_path(&uri).unwrap(),
+                Path::new(p),
+                "uri = {}",
+                uri.as_str()
+            );
         }
     }
 

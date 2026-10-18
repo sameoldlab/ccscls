@@ -3,8 +3,8 @@
 
 mod common;
 use common::{Observer, parse_cursor};
-use css_class_lsp::line_index::LineIndex;
 use css_class_lsp::languages::Language;
+use css_class_lsp::line_index::LineIndex;
 
 /// (text before the cursor's token, whole token) at `$0`, or None if the cursor
 /// is not in a class value.
@@ -12,7 +12,10 @@ fn ctx(marked: &str) -> Option<(String, String)> {
     let (text, pos) = parse_cursor(marked);
     let offset = LineIndex::new(&text).offset(&text, pos);
     let c = Language::Html.class_context_at(&text, offset)?;
-    Some((text[c.prefix.range()].to_owned(), text[c.replace.range()].to_owned()))
+    Some((
+        text[c.prefix.range()].to_owned(),
+        text[c.replace.range()].to_owned(),
+    ))
 }
 
 fn some(prefix: &str, token: &str) -> Option<(String, String)> {
@@ -52,9 +55,18 @@ fn outside_class_values() {
 #[test]
 fn class_values_after_other_constructs() {
     assert_eq!(ctx("<!-- c --><p class=\"a$0\">"), some("a", "a"));
-    assert_eq!(ctx("<script>let a;</script><p class=\"a$0\">"), some("a", "a"));
-    assert_eq!(ctx("<style>.x{}</style>\n<p class=\"a$0\">"), some("a", "a"));
-    assert_eq!(ctx("<?xml v?>\n<!doctype html>\n<p class=\"a$0\">"), some("a", "a"));
+    assert_eq!(
+        ctx("<script>let a;</script><p class=\"a$0\">"),
+        some("a", "a")
+    );
+    assert_eq!(
+        ctx("<style>.x{}</style>\n<p class=\"a$0\">"),
+        some("a", "a")
+    );
+    assert_eq!(
+        ctx("<?xml v?>\n<!doctype html>\n<p class=\"a$0\">"),
+        some("a", "a")
+    );
     assert_eq!(ctx("</div><p class=\"a$0\">"), some("a", "a"));
 }
 
@@ -70,8 +82,14 @@ fn unterminated_value_while_typing() {
 
 #[test]
 fn multiline_values_and_attribute_layouts() {
-    assert_eq!(ctx("<div\n  id=\"x\"\n  class=\"one\n         tw$0o\n         three\">"), some("tw", "two"));
-    assert_eq!(ctx("<input disabled class=\"a$0\" value=\"b\">"), some("a", "a"));
+    assert_eq!(
+        ctx("<div\n  id=\"x\"\n  class=\"one\n         tw$0o\n         three\">"),
+        some("tw", "two")
+    );
+    assert_eq!(
+        ctx("<input disabled class=\"a$0\" value=\"b\">"),
+        some("a", "a")
+    );
     assert_eq!(ctx("<img src=x.png class=\"a$0\"/>"), some("a", "a"));
     assert_eq!(ctx("<P CLASS=\"a$0\">"), some("a", "a"));
     assert_eq!(ctx("<div class\n=\n\"a$0\">"), some("a", "a"));

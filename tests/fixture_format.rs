@@ -10,9 +10,15 @@ fn parses_names_raw_and_context() {
     let src = "x\n.a, .b { }  /*~ a, b */\n.sm\\:flex { } /*~ sm\\:flex=>sm:flex */ /*ctx: @layer x | @media (a > b) */\n";
     let got = parse_expectations(src);
     assert_eq!(got.len(), 3);
-    assert_eq!((got[0].line, got[0].raw.as_str(), got[0].name.as_str()), (1, "a", "a"));
+    assert_eq!(
+        (got[0].line, got[0].raw.as_str(), got[0].name.as_str()),
+        (1, "a", "a")
+    );
     assert!(got[0].ctx.is_empty());
-    assert_eq!((got[2].line, got[2].raw.as_str(), got[2].name.as_str()), (2, "sm\\:flex", "sm:flex"));
+    assert_eq!(
+        (got[2].line, got[2].raw.as_str(), got[2].name.as_str()),
+        (2, "sm\\:flex", "sm:flex")
+    );
     assert_eq!(got[2].ctx, vec!["@layer x", "@media (a > b)"]);
 }
 

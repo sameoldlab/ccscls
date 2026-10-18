@@ -51,7 +51,9 @@ impl Default for Engines {
 
 impl Engines {
     pub fn new() -> Self {
-        Self { css: css::CssIndexer::new() }
+        Self {
+            css: css::CssIndexer::new(),
+        }
     }
 
     /// Why a language cannot analyze files at all (a grammar that failed to load), if so.
@@ -64,7 +66,10 @@ impl Language {
     /// Decide from the editor's language id first, then the file extension.
     pub fn detect(language_id: Option<&str>, path: Option<&Path>) -> Option<Self> {
         if let Some(id) = language_id {
-            if let Some(language) = ALL.into_iter().find(|language| language.language_ids().contains(&id)) {
+            if let Some(language) = ALL
+                .into_iter()
+                .find(|language| language.language_ids().contains(&id))
+            {
                 return Some(language);
             }
         }
@@ -84,7 +89,13 @@ impl Language {
     /// Fill `out` with this file's occurrences and imports, interning names into
     /// `strings`. Embedded regions are analyzed here and their definitions are
     /// marked private to the file.
-    pub fn analyze(self, engines: &mut Engines, text: &str, strings: &mut Strings, out: &mut FileAnalysis) {
+    pub fn analyze(
+        self,
+        engines: &mut Engines,
+        text: &str,
+        strings: &mut Strings,
+        out: &mut FileAnalysis,
+    ) {
         let regions = match self {
             Self::Css => {
                 css::analyze(&mut engines.css, text, strings, out);
@@ -102,7 +113,14 @@ impl Language {
 
     /// Analyze `text[span]` as this language and merge the result into `out`,
     /// with spans moved back into the whole file's coordinates.
-    fn analyze_region(self, engines: &mut Engines, text: &str, span: Span, strings: &mut Strings, out: &mut FileAnalysis) {
+    fn analyze_region(
+        self,
+        engines: &mut Engines,
+        text: &str,
+        span: Span,
+        strings: &mut Strings,
+        out: &mut FileAnalysis,
+    ) {
         let Some(region_text) = text.get(span.range()) else {
             return;
         };
@@ -117,8 +135,20 @@ impl Language {
             let rule_span = occurrence.rule_span.shifted(span.start);
             let context = inner.context_of(occurrence);
             match occurrence.role {
-                Role::Definition => out.add_private(occurrence.role, occurrence.name, name_span, rule_span, context),
-                Role::Usage => out.add(occurrence.role, occurrence.name, name_span, rule_span, context),
+                Role::Definition => out.add_private(
+                    occurrence.role,
+                    occurrence.name,
+                    name_span,
+                    rule_span,
+                    context,
+                ),
+                Role::Usage => out.add(
+                    occurrence.role,
+                    occurrence.name,
+                    name_span,
+                    rule_span,
+                    context,
+                ),
             }
         }
         for import in &inner.imports {
@@ -171,16 +201,28 @@ mod tests {
     #[test]
     fn detection_prefers_language_id_then_extension() {
         assert_eq!(Language::detect(Some("css"), None), Some(Language::Css));
-        assert_eq!(Language::detect(Some("html"), path("x.txt")), Some(Language::Html));
-        assert_eq!(Language::detect(None, path("a/b.HTM")), Some(Language::Html));
-        assert_eq!(Language::detect(Some("plaintext"), path("a.css")), Some(Language::Css));
+        assert_eq!(
+            Language::detect(Some("html"), path("x.txt")),
+            Some(Language::Html)
+        );
+        assert_eq!(
+            Language::detect(None, path("a/b.HTM")),
+            Some(Language::Html)
+        );
+        assert_eq!(
+            Language::detect(Some("plaintext"), path("a.css")),
+            Some(Language::Css)
+        );
         assert_eq!(Language::detect(Some("javascript"), path("a.js")), None);
         assert_eq!(Language::detect(None, None), None);
     }
 
     #[test]
     fn watch_globs_cover_every_extension() {
-        assert_eq!(Language::watch_globs(), ["**/*.css", "**/*.html", "**/*.htm"]);
+        assert_eq!(
+            Language::watch_globs(),
+            ["**/*.css", "**/*.html", "**/*.htm"]
+        );
     }
 
     #[test]
@@ -207,10 +249,19 @@ mod tests {
             found,
             vec![
                 (Role::Usage, crate::analysis::Scope::Shared, "x", "x"),
-                (Role::Definition, crate::analysis::Scope::Private, "only", "only"),
+                (
+                    Role::Definition,
+                    crate::analysis::Scope::Private,
+                    "only",
+                    "only"
+                ),
             ]
         );
-        let imports: Vec<&str> = out.imports.iter().map(|import| source.get(import.span.range()).unwrap_or("?")).collect();
+        let imports: Vec<&str> = out
+            .imports
+            .iter()
+            .map(|import| source.get(import.span.range()).unwrap_or("?"))
+            .collect();
         assert_eq!(imports, ["extra.css"]);
     }
 

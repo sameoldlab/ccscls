@@ -11,7 +11,14 @@ use std::path::{Path, PathBuf};
 
 const PENDING_NAME_CLEANUP: &[&str] = &[];
 
-const PANIC_MARKERS: &[&str] = &[".unwrap()", ".expect(", "panic!(", "unreachable!(", "todo!(", "unimplemented!("];
+const PANIC_MARKERS: &[&str] = &[
+    ".unwrap()",
+    ".expect(",
+    "panic!(",
+    "unreachable!(",
+    "todo!(",
+    "unimplemented!(",
+];
 
 struct CodeLine {
     number: usize,
@@ -54,7 +61,13 @@ fn is_ident_char(ch: char) -> bool {
 
 fn analyze(source: &str) -> Vec<CodeLine> {
     let chars: Vec<char> = source.chars().collect();
-    let mut lexer = Lexer { lines: Vec::new(), code: String::new(), seen_code: false, trailing: false, number: 1 };
+    let mut lexer = Lexer {
+        lines: Vec::new(),
+        code: String::new(),
+        seen_code: false,
+        trailing: false,
+        number: 1,
+    };
     let mut state = State::Code;
     let mut cursor = 0;
     let at = |index: usize| chars.get(index).copied();
@@ -113,7 +126,11 @@ fn analyze(source: &str) -> Vec<CodeLine> {
                     state = State::BlockComment(depth + 1);
                     cursor += 2;
                 } else if ch == '*' && at(cursor + 1) == Some('/') {
-                    state = if depth == 1 { State::Code } else { State::BlockComment(depth - 1) };
+                    state = if depth == 1 {
+                        State::Code
+                    } else {
+                        State::BlockComment(depth - 1)
+                    };
                     cursor += 2;
                 } else {
                     if ch == '\n' {
@@ -138,7 +155,8 @@ fn analyze(source: &str) -> Vec<CodeLine> {
                 }
             }
             State::RawStr(hashes) => {
-                let closes = ch == '"' && (1..=hashes).all(|offset| at(cursor + offset) == Some('#'));
+                let closes =
+                    ch == '"' && (1..=hashes).all(|offset| at(cursor + offset) == Some('#'));
                 if closes {
                     state = State::Code;
                     cursor += 1 + hashes;
@@ -196,7 +214,8 @@ fn identifiers(text: &str) -> Vec<&str> {
 
 fn is_binding_name(word: &str) -> bool {
     let first = word.chars().next().unwrap_or('A');
-    (first.is_lowercase() || first == '_') && !matches!(word, "mut" | "ref" | "in" | "if" | "else" | "as")
+    (first.is_lowercase() || first == '_')
+        && !matches!(word, "mut" | "ref" | "in" | "if" | "else" | "as")
 }
 
 /// Single-letter names introduced by `let`, `for`, closure and `fn` parameter lists on this line.
@@ -204,7 +223,8 @@ fn single_letter_bindings(code: &str) -> Vec<String> {
     let mut patterns: Vec<&str> = Vec::new();
 
     for (index, _) in code.match_indices("let ") {
-        let boundary_before = index == 0 || !is_ident_char(code[..index].chars().next_back().unwrap_or(' '));
+        let boundary_before =
+            index == 0 || !is_ident_char(code[..index].chars().next_back().unwrap_or(' '));
         if !boundary_before {
             continue;
         }
@@ -213,7 +233,9 @@ fn single_letter_bindings(code: &str) -> Vec<String> {
             .char_indices()
             .find(|&(offset, ch)| {
                 let next = rest[offset + ch.len_utf8()..].chars().next();
-                (ch == '=' && next != Some('=') && next != Some('>')) || ch == ';' || (ch == ':' && next != Some(':'))
+                (ch == '=' && next != Some('=') && next != Some('>'))
+                    || ch == ';'
+                    || (ch == ':' && next != Some(':'))
             })
             .map_or(rest.len(), |(offset, _)| offset);
         patterns.push(&rest[..end]);
@@ -253,17 +275,24 @@ fn single_letter_bindings(code: &str) -> Vec<String> {
     patterns
         .into_iter()
         .flat_map(identifiers)
-        .filter(|word| is_binding_name(word) && word.chars().count() == 1 && *word != "i" && *word != "_")
+        .filter(|word| {
+            is_binding_name(word) && word.chars().count() == 1 && *word != "i" && *word != "_"
+        })
         .map(str::to_owned)
         .collect()
 }
 
 fn rust_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            if !matches!(path.file_name().and_then(|name| name.to_str()), Some("fixtures" | "target")) {
+            if !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("fixtures" | "target")
+            ) {
                 rust_files(&path, found);
             }
         } else if path.extension().is_some_and(|extension| extension == "rs") {
@@ -282,7 +311,11 @@ fn crate_files(subdirs: &[&str]) -> Vec<(String, String)> {
     paths
         .into_iter()
         .filter_map(|path| {
-            let relative = path.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/");
+            let relative = path
+                .strip_prefix(root)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
             Some((relative, std::fs::read_to_string(&path).ok()?))
         })
         .collect()
@@ -306,7 +339,11 @@ fn no_comment_at_the_end_of_a_line_of_code() {
             }
         }
     }
-    assert!(violations.is_empty(), "move these comments to the line above:\n{}", violations.join("\n"));
+    assert!(
+        violations.is_empty(),
+        "move these comments to the line above:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]
@@ -321,7 +358,11 @@ fn library_code_does_not_panic_on_purpose() {
             }
         }
     }
-    assert!(violations.is_empty(), "an LSP server must not crash in normal use:\n{}", violations.join("\n"));
+    assert!(
+        violations.is_empty(),
+        "an LSP server must not crash in normal use:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]
@@ -337,15 +378,27 @@ fn library_code_has_no_single_letter_names() {
             }
         }
     }
-    assert!(violations.is_empty(), "use descriptive names:\n{}", violations.join("\n"));
+    assert!(
+        violations.is_empty(),
+        "use descriptive names:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]
 fn pending_list_only_names_files_that_still_have_violations() {
     for path in PENDING_NAME_CLEANUP {
-        let (_, source) = crate_files(&["src"]).into_iter().find(|(name, _)| name == path).expect("listed file exists");
-        let still_violating = library_lines(&source).iter().any(|line| !single_letter_bindings(&line.code).is_empty());
-        assert!(still_violating, "{path} is clean now: remove it from PENDING_NAME_CLEANUP");
+        let (_, source) = crate_files(&["src"])
+            .into_iter()
+            .find(|(name, _)| name == path)
+            .expect("listed file exists");
+        let still_violating = library_lines(&source)
+            .iter()
+            .any(|line| !single_letter_bindings(&line.code).is_empty());
+        assert!(
+            still_violating,
+            "{path} is clean now: remove it from PENDING_NAME_CLEANUP"
+        );
     }
 }
 
@@ -357,8 +410,12 @@ fn lexer_understands_strings_comments_and_literals() {
     assert!(!flagged("// note\nlet url = \"http://example.com\";\n"));
     assert!(!flagged("let text = r#\"// not a comment\"#;\n"));
     assert!(!flagged("let quote = '\"'; let tick = '\\'';\n"));
-    assert!(!flagged("fn lifetime<'a>(text: &'a str) -> &'a str { text }\n"));
-    assert!(!flagged("let multi = \"first\nsecond // still a string\";\n"));
+    assert!(!flagged(
+        "fn lifetime<'a>(text: &'a str) -> &'a str { text }\n"
+    ));
+    assert!(!flagged(
+        "let multi = \"first\nsecond // still a string\";\n"
+    ));
     assert!(!flagged("/* block\n   comment */\nlet name = 1;\n"));
 }
 

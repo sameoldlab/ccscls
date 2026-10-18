@@ -36,9 +36,7 @@ fn every_css_fixture_matches_its_annotations() {
 
 /// Expected-only lines are `-`, found-only lines are `+`.
 fn diff(want: &[Expected], got: &[Expected]) -> String {
-    let fmt = |e: &Expected| {
-        format!("L{} {} => {}  ctx={:?}", e.line + 1, e.raw, e.name, e.ctx)
-    };
+    let fmt = |e: &Expected| format!("L{} {} => {}  ctx={:?}", e.line + 1, e.raw, e.name, e.ctx);
     let mut out = Vec::new();
     for e in want.iter().filter(|e| !got.contains(e)) {
         out.push(format!("  - {}", fmt(e)));

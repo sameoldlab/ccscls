@@ -7,8 +7,8 @@ use css_class_lsp::languages::{Engines, Language};
 use css_class_lsp::strings::Strings;
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response, ResponseError};
 use lsp_types::{
-    ClientCapabilities, DidChangeWatchedFilesClientCapabilities, InitializeParams, InitializeResult,
-    Location, Position, Range, Uri, WorkspaceClientCapabilities, WorkspaceFolder,
+    ClientCapabilities, DidChangeWatchedFilesClientCapabilities, InitializeParams,
+    InitializeResult, Location, Position, Range, Uri, WorkspaceClientCapabilities, WorkspaceFolder,
 };
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -68,7 +68,9 @@ pub fn parse_expectations_in(src: &str, syntax: Syntax) -> Vec<Expected> {
     let mut out = Vec::new();
     for (i, line) in src.split('\n').enumerate() {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let Some(classes) = marker(line, open, close) else { continue };
+        let Some(classes) = marker(line, open, close) else {
+            continue;
+        };
         let ctx: Vec<String> = marker(line, "/*ctx:", "*/")
             .map(|c| c.split('|').map(|s| s.trim().to_owned()).collect())
             .unwrap_or_default();
@@ -109,7 +111,10 @@ pub struct Observer {
 
 impl Observer {
     pub fn new() -> Self {
-        Self { engines: Engines::new(), strings: Strings::new() }
+        Self {
+            engines: Engines::new(),
+            strings: Strings::new(),
+        }
     }
 
     pub fn observe(&mut self, language: Language, source: &str) -> Vec<Observed> {
@@ -272,7 +277,10 @@ impl TempWorkspace {
             let uri = css_class_lsp::uri::path_to_uri(&path).unwrap();
             for (e, range) in expected_ranges_in(&src, syntax) {
                 if e.name == name {
-                    out.push(Location { uri: uri.clone(), range });
+                    out.push(Location {
+                        uri: uri.clone(),
+                        range,
+                    });
                 }
             }
         }
@@ -284,7 +292,11 @@ impl TempWorkspace {
     /// of `name` in `rel`.
     pub fn cursor_on(&self, rel: &str, name: &str, nth: usize, chars_in: u32) -> Position {
         let src = self.read(rel);
-        let syntax = if rel.ends_with(".css") { Syntax::Css } else { Syntax::Html };
+        let syntax = if rel.ends_with(".css") {
+            Syntax::Css
+        } else {
+            Syntax::Html
+        };
         let (_, r) = expected_ranges_in(&src, syntax)
             .into_iter()
             .filter(|(e, _)| e.name == name)
@@ -296,7 +308,11 @@ impl TempWorkspace {
 
 pub fn sort_locations(locs: &mut [Location]) {
     locs.sort_by_key(|l| {
-        (l.uri.as_str().to_owned(), l.range.start.line, l.range.start.character)
+        (
+            l.uri.as_str().to_owned(),
+            l.range.start.line,
+            l.range.start.character,
+        )
     });
 }
 
@@ -332,7 +348,13 @@ pub fn apply_edits(text: &str, edits: &[lsp_types::TextEdit]) -> String {
     let li = css_class_lsp::line_index::LineIndex::new(text);
     let mut spans: Vec<(usize, usize, &str)> = edits
         .iter()
-        .map(|e| (li.offset(text, e.range.start), li.offset(text, e.range.end), e.new_text.as_str()))
+        .map(|e| {
+            (
+                li.offset(text, e.range.start),
+                li.offset(text, e.range.end),
+                e.new_text.as_str(),
+            )
+        })
         .collect();
     spans.sort_by_key(|s| std::cmp::Reverse(s.0));
     let mut out = text.to_owned();
@@ -414,7 +436,10 @@ impl TestClient {
     pub fn notify<N: lsp_types::notification::Notification>(&self, params: N::Params) {
         self.conn
             .sender
-            .send(Message::Notification(Notification::new(N::METHOD.into(), params)))
+            .send(Message::Notification(Notification::new(
+                N::METHOD.into(),
+                params,
+            )))
             .unwrap();
     }
 
@@ -424,7 +449,11 @@ impl TestClient {
         let id = RequestId::from(self.next_id);
         self.conn
             .sender
-            .send(Message::Request(Request::new(id.clone(), R::METHOD.into(), params)))
+            .send(Message::Request(Request::new(
+                id.clone(),
+                R::METHOD.into(),
+                params,
+            )))
             .unwrap();
         id
     }
@@ -443,7 +472,10 @@ impl TestClient {
                     self.conn.sender.send(Message::Response(reply)).unwrap();
                     self.server_requests.push(req);
                 }
-                Err(e) => panic!("no response to {id:?} ({e}); notifications so far: {:?}", self.notifications),
+                Err(e) => panic!(
+                    "no response to {id:?} ({e}); notifications so far: {:?}",
+                    self.notifications
+                ),
             }
         }
     }
@@ -461,23 +493,41 @@ impl TestClient {
     }
 
     /// Like `request`, but returns the error response instead of panicking.
-    pub fn try_request<R: lsp_types::request::Request>(&mut self, params: R::Params) -> Result<R::Result, ResponseError> {
+    pub fn try_request<R: lsp_types::request::Request>(
+        &mut self,
+        params: R::Params,
+    ) -> Result<R::Result, ResponseError> {
         let id = self.send::<R>(params);
-        self.wait_raw(&id).response_result.map(|v| serde_json::from_value(v).unwrap())
+        self.wait_raw(&id)
+            .response_result
+            .map(|v| serde_json::from_value(v).unwrap())
     }
 
-    pub fn request_err<R: lsp_types::request::Request>(&mut self, params: R::Params) -> ResponseError {
+    pub fn request_err<R: lsp_types::request::Request>(
+        &mut self,
+        params: R::Params,
+    ) -> ResponseError {
         let id = self.send::<R>(params);
-        self.wait_raw(&id).response_result.expect_err("expected an error response")
+        self.wait_raw(&id)
+            .response_result
+            .expect_err("expected an error response")
     }
 
     /// A request with an arbitrary method name and JSON params.
-    pub fn raw_request(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, ResponseError> {
+    pub fn raw_request(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, ResponseError> {
         self.next_id += 1;
         let id = RequestId::from(self.next_id);
         self.conn
             .sender
-            .send(Message::Request(Request::new(id.clone(), method.into(), params)))
+            .send(Message::Request(Request::new(
+                id.clone(),
+                method.into(),
+                params,
+            )))
             .unwrap();
         self.wait_raw(&id).response_result
     }
@@ -530,7 +580,10 @@ impl TestClient {
     pub fn change(&self, uri: &Uri, version: i32, text: &str) {
         self.notify::<lsp_types::notification::DidChangeTextDocument>(
             lsp_types::DidChangeTextDocumentParams {
-                text_document: lsp_types::VersionedTextDocumentIdentifier { uri: uri.clone(), version },
+                text_document: lsp_types::VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
                 content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
                     range: None,
                     range_length: None,
@@ -548,7 +601,11 @@ impl TestClient {
         );
     }
 
-    pub fn definition(&mut self, uri: &Uri, pos: Position) -> Option<lsp_types::GotoDefinitionResponse> {
+    pub fn definition(
+        &mut self,
+        uri: &Uri,
+        pos: Position,
+    ) -> Option<lsp_types::GotoDefinitionResponse> {
         self.request::<lsp_types::request::GotoDefinition>(lsp_types::GotoDefinitionParams {
             text_document_position_params: position_params(uri, pos),
             work_done_progress_params: Default::default(),
@@ -568,12 +625,19 @@ impl TestClient {
         self.request::<lsp_types::request::HoverRequest>(hover_params(uri, pos))
     }
 
-    pub fn references(&mut self, uri: &Uri, pos: Position, include_declaration: bool) -> Option<Vec<Location>> {
+    pub fn references(
+        &mut self,
+        uri: &Uri,
+        pos: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
         self.request::<lsp_types::request::References>(lsp_types::ReferenceParams {
             text_document_position: position_params(uri, pos),
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
-            context: lsp_types::ReferenceContext { include_declaration },
+            context: lsp_types::ReferenceContext {
+                include_declaration,
+            },
         })
     }
 
@@ -587,7 +651,10 @@ impl TestClient {
             assert!(std::time::Instant::now() < deadline, "server did not exit");
             std::thread::sleep(Duration::from_millis(5));
         }
-        handle.join().expect("server panicked").expect("server returned an error");
+        handle
+            .join()
+            .expect("server panicked")
+            .expect("server returned an error");
     }
 }
 
@@ -609,17 +676,21 @@ pub fn uri(s: &str) -> Uri {
     Uri::from_str(s).unwrap()
 }
 
-
 /// Position `chars_in` characters into the first occurrence of `needle`.
 pub fn position_of(text: &str, needle: &str, chars_in: usize) -> Position {
-    let idx = text.find(needle).unwrap_or_else(|| panic!("`{needle}` not in {text:?}")) + chars_in;
+    let idx = text
+        .find(needle)
+        .unwrap_or_else(|| panic!("`{needle}` not in {text:?}"))
+        + chars_in;
     let line = text[..idx].matches('\n').count() as u32;
     let line_start = text[..idx].rfind('\n').map_or(0, |i| i + 1);
     Position::new(line, text[line_start..idx].encode_utf16().count() as u32)
 }
 
 /// Flatten a `WorkspaceEdit` (`changes` form) to uri -> edits.
-pub fn edits_by_uri(edit: &lsp_types::WorkspaceEdit) -> std::collections::BTreeMap<String, Vec<lsp_types::TextEdit>> {
+pub fn edits_by_uri(
+    edit: &lsp_types::WorkspaceEdit,
+) -> std::collections::BTreeMap<String, Vec<lsp_types::TextEdit>> {
     edit.changes
         .as_ref()
         .expect("server must return `changes`")

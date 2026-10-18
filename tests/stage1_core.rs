@@ -10,7 +10,10 @@ use lsp_types::*;
 
 fn site() -> (TempWorkspace, TestClient) {
     let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions { workspace: Some(ws.path().to_path_buf()), ..Default::default() });
+    let c = TestClient::start(ClientOptions {
+        workspace: Some(ws.path().to_path_buf()),
+        ..Default::default()
+    });
     (ws, c)
 }
 
@@ -43,7 +46,10 @@ fn hover_text(h: Option<Hover>) -> String {
 fn initialize_advertises_capabilities() {
     let (_ws, c) = site();
     let caps = &c.init.capabilities;
-    assert_eq!(caps.hover_provider, Some(HoverProviderCapability::Simple(true)));
+    assert_eq!(
+        caps.hover_provider,
+        Some(HoverProviderCapability::Simple(true))
+    );
     assert_eq!(caps.definition_provider, Some(OneOf::Left(true)));
     assert_eq!(caps.references_provider, Some(OneOf::Left(true)));
     assert!(caps.completion_provider.is_some());
@@ -70,7 +76,16 @@ fn completion_offers_every_workspace_class_inside_class_values() {
     // Sorted; nothing from node_modules/ or the gitignored generated/.
     assert_eq!(
         labels(r),
-        ["active", "btn", "btn-large", "card", "card-title", "home", "page", "title"]
+        [
+            "active",
+            "btn",
+            "btn-large",
+            "card",
+            "card-title",
+            "home",
+            "page",
+            "title"
+        ]
     );
     c.shutdown();
 }
@@ -81,13 +96,20 @@ fn completion_items_replace_the_whole_token_and_show_rule_counts() {
     let u = uri("file:///virtual/t.html");
     let (text, pos) = parse_cursor(r#"<div class="b$0tn">"#);
     c.open(&u, "html", &text);
-    let Some(CompletionResponse::Array(items)) = complete(&mut c, &u, pos) else { panic!("no items") };
+    let Some(CompletionResponse::Array(items)) = complete(&mut c, &u, pos) else {
+        panic!("no items")
+    };
     let btn = items.iter().find(|i| i.label == "btn").unwrap();
     assert_eq!(btn.kind, Some(CompletionItemKind::CLASS));
     assert_eq!(btn.detail.as_deref(), Some("4 rules"));
     // `btn` spans columns 12..15; the cursor is inside it.
-    let Some(CompletionTextEdit::Edit(edit)) = &btn.text_edit else { panic!("no text edit") };
-    assert_eq!(edit.range, Range::new(Position::new(0, 12), Position::new(0, 15)));
+    let Some(CompletionTextEdit::Edit(edit)) = &btn.text_edit else {
+        panic!("no text edit")
+    };
+    assert_eq!(
+        edit.range,
+        Range::new(Position::new(0, 12), Position::new(0, 15))
+    );
     assert_eq!(edit.new_text, "btn");
     let page = items.iter().find(|i| i.label == "page").unwrap();
     assert_eq!(page.detail.as_deref(), Some("1 rule"));
@@ -154,7 +176,10 @@ fn definition_is_null_for_undefined_classes_and_non_classes() {
     let (ws, mut c) = site();
     let u = ws.uri("index.html");
     c.open(&u, "html", &ws.read("index.html"));
-    assert!(c.definition(&u, ws.cursor_on("index.html", "missing-class", 0, 1)).is_none());
+    assert!(
+        c.definition(&u, ws.cursor_on("index.html", "missing-class", 0, 1))
+            .is_none()
+    );
     // Cursor on the `<h1>` tag name.
     assert!(c.definition(&u, Position::new(6, 4)).is_none());
     c.shutdown();
@@ -246,15 +271,24 @@ fn hover_lists_all_rules_with_their_at_rule_context() {
 #[test]
 fn hover_on_an_unknown_class_says_so() {
     let (ws, mut c) = site();
-    let text = hover_text(c.hover(&ws.uri("index.html"), ws.cursor_on("index.html", "missing-class", 0, 3)));
-    assert_eq!(text, "**`.missing-class`** — no matching rule in the workspace CSS");
+    let text = hover_text(c.hover(
+        &ws.uri("index.html"),
+        ws.cursor_on("index.html", "missing-class", 0, 3),
+    ));
+    assert_eq!(
+        text,
+        "**`.missing-class`** — no matching rule in the workspace CSS"
+    );
     c.shutdown();
 }
 
 #[test]
 fn hover_is_null_off_classes() {
     let (ws, mut c) = site();
-    assert!(c.hover(&ws.uri("index.html"), Position::new(0, 3)).is_none());
+    assert!(
+        c.hover(&ws.uri("index.html"), Position::new(0, 3))
+            .is_none()
+    );
     c.shutdown();
 }
 
@@ -268,8 +302,15 @@ fn unsaved_css_buffer_overrides_disk_until_closed() {
     let pos = ws.cursor_on("index.html", "btn-large", 0, 1);
 
     // The editor has an unsaved edit that renames .btn-large.
-    c.open(&css, "css", &ws.read("css/styles.css").replace(".btn-large", ".btn-xl"));
-    assert!(c.definition(&html, pos).is_none(), "disk version must be shadowed by the buffer");
+    c.open(
+        &css,
+        "css",
+        &ws.read("css/styles.css").replace(".btn-large", ".btn-xl"),
+    );
+    assert!(
+        c.definition(&html, pos).is_none(),
+        "disk version must be shadowed by the buffer"
+    );
     assert!(hover_text(c.hover(&html, pos)).contains("no matching rule"));
 
     // Closing without saving reverts to disk.
@@ -285,13 +326,30 @@ fn unsaved_html_buffer_adds_usages() {
     let (ws, mut c) = site();
     let about = ws.uri("about.html");
     let pos = ws.cursor_on("index.html", "btn", 0, 1);
-    let before = c.references(&ws.uri("index.html"), pos, false).unwrap().len();
+    let before = c
+        .references(&ws.uri("index.html"), pos, false)
+        .unwrap()
+        .len();
     assert_eq!(before, 3);
 
-    c.open(&about, "html", &(ws.read("about.html") + "<p class=\"btn\">new</p>\n"));
-    assert_eq!(c.references(&ws.uri("index.html"), pos, false).unwrap().len(), 4);
+    c.open(
+        &about,
+        "html",
+        &(ws.read("about.html") + "<p class=\"btn\">new</p>\n"),
+    );
+    assert_eq!(
+        c.references(&ws.uri("index.html"), pos, false)
+            .unwrap()
+            .len(),
+        4
+    );
     c.close(&about);
-    assert_eq!(c.references(&ws.uri("index.html"), pos, false).unwrap().len(), 3);
+    assert_eq!(
+        c.references(&ws.uri("index.html"), pos, false)
+            .unwrap()
+            .len(),
+        3
+    );
     c.shutdown();
 }
 
@@ -334,14 +392,26 @@ fn columns_are_utf16_on_both_sides() {
     c.open(&html, "html", r#"<p title="😀é" class="zz">"#);
 
     let got = c.definition_locations(&html, Position::new(0, 23));
-    assert_eq!(got, vec![Location { uri: css.clone(), range: Range::new(Position::new(0, 11), Position::new(0, 13)) }]);
+    assert_eq!(
+        got,
+        vec![Location {
+            uri: css.clone(),
+            range: Range::new(Position::new(0, 11), Position::new(0, 13))
+        }]
+    );
 
     let refs = c.references(&css, Position::new(0, 12), true).unwrap();
     assert_eq!(
         refs,
         vec![
-            Location { uri: css, range: Range::new(Position::new(0, 11), Position::new(0, 13)) },
-            Location { uri: html, range: Range::new(Position::new(0, 22), Position::new(0, 24)) },
+            Location {
+                uri: css,
+                range: Range::new(Position::new(0, 11), Position::new(0, 13))
+            },
+            Location {
+                uri: html,
+                range: Range::new(Position::new(0, 22), Position::new(0, 24))
+            },
         ]
     );
     c.shutdown();
@@ -358,7 +428,11 @@ fn node_modules_and_gitignored_directories_are_not_indexed() {
         // If the on-disk copies were indexed there would be a second location,
         // and the references would include their html usages as well.
         let refs = c.references(&css, Position::new(line, 3), true).unwrap();
-        assert_eq!(refs.len(), 1, "`{name}` leaked from an ignored directory: {refs:?}");
+        assert_eq!(
+            refs.len(),
+            1,
+            "`{name}` leaked from an ignored directory: {refs:?}"
+        );
     }
     c.shutdown();
 }
@@ -374,7 +448,10 @@ fn watched_file_events_update_the_index() {
     };
     let watch = |c: &TestClient, rel: &str, typ: FileChangeType| {
         c.notify::<notification::DidChangeWatchedFiles>(DidChangeWatchedFilesParams {
-            changes: vec![FileEvent { uri: ws.uri(rel), typ }],
+            changes: vec![FileEvent {
+                uri: ws.uri(rel),
+                typ,
+            }],
         });
     };
 
@@ -400,13 +477,18 @@ fn watched_file_events_do_not_clobber_open_buffers() {
     c.open(&css, "css", ".only-in-buffer { }");
     ws.write("css/styles.css", ".on-disk { }");
     c.notify::<notification::DidChangeWatchedFiles>(DidChangeWatchedFilesParams {
-        changes: vec![FileEvent { uri: css.clone(), typ: FileChangeType::CHANGED }],
+        changes: vec![FileEvent {
+            uri: css.clone(),
+            typ: FileChangeType::CHANGED,
+        }],
     });
     assert_eq!(c.definition_locations(&css, Position::new(0, 3)).len(), 1);
     // now the disk version wins
     c.close(&css);
     c.open(&uri("file:///virtual/p.css"), "css", ".on-disk { }");
-    let refs = c.references(&uri("file:///virtual/p.css"), Position::new(0, 3), true).unwrap();
+    let refs = c
+        .references(&uri("file:///virtual/p.css"), Position::new(0, 3), true)
+        .unwrap();
     assert_eq!(refs.len(), 2, "virtual doc + the reloaded styles.css");
     c.shutdown();
 }
@@ -480,9 +562,13 @@ fn closing_an_unsaved_document_forgets_it() {
 #[test]
 fn unknown_methods_and_bad_params_get_error_responses() {
     let (_ws, mut c) = site();
-    let err = c.raw_request("textDocument/somethingElse", serde_json::json!({})).unwrap_err();
+    let err = c
+        .raw_request("textDocument/somethingElse", serde_json::json!({}))
+        .unwrap_err();
     assert_eq!(err.code, -32601);
-    let err = c.raw_request("textDocument/hover", serde_json::json!({ "bogus": 1 })).unwrap_err();
+    let err = c
+        .raw_request("textDocument/hover", serde_json::json!({ "bogus": 1 }))
+        .unwrap_err();
     assert_eq!(err.code, -32602);
     // ...and the server is still alive afterwards.
     c.barrier();

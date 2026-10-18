@@ -34,12 +34,12 @@ use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     CompletionTextEdit, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, FileChangeType, FileSystemWatcher, GlobPattern, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, MarkupContent, MarkupKind, OneOf, Range,
-    ReferenceParams, Registration, RegistrationParams, ServerCapabilities, ServerInfo,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextEdit,
+    DidOpenTextDocumentParams, FileChangeType, FileSystemWatcher, GlobPattern,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, Location, MarkupContent,
+    MarkupKind, OneOf, Range, ReferenceParams, Registration, RegistrationParams,
+    ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::panic::AssertUnwindSafe;
@@ -52,11 +52,13 @@ const MAX_HOVER_RULE_CHARS: usize = 2_000;
 
 pub fn capabilities() -> ServerCapabilities {
     ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
-            open_close: Some(true),
-            change: Some(TextDocumentSyncKind::FULL),
-            ..Default::default()
-        })),
+        text_document_sync: Some(TextDocumentSyncCapability::Options(
+            TextDocumentSyncOptions {
+                open_close: Some(true),
+                change: Some(TextDocumentSyncKind::FULL),
+                ..Default::default()
+            },
+        )),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec!["\"".into(), "'".into(), " ".into()]),
             ..Default::default()
@@ -100,7 +102,9 @@ pub fn run(connection: Connection) -> Result<()> {
 
     let mut server = Server::new(&params);
     if let Some(error) = server.workspace.load_error() {
-        eprintln!("[css-class-lsp] a grammar failed to load, so its files are not indexed: {error}");
+        eprintln!(
+            "[css-class-lsp] a grammar failed to load, so its files are not indexed: {error}"
+        );
     }
     // `initialize_finish` has already consumed the client's `initialized`
     // notification, so the post-handshake work happens here.
@@ -125,7 +129,10 @@ pub fn run(connection: Connection) -> Result<()> {
             Message::Notification(notification) => {
                 let (method, started) = (notification.method.clone(), Instant::now());
                 server.handle_notification(notification);
-                server.log(format_args!("notification {method} ({:?})", started.elapsed()));
+                server.log(format_args!(
+                    "notification {method} ({:?})",
+                    started.elapsed()
+                ));
             }
             // Replies to our own registerCapability request.
             Message::Response(_) => {}
@@ -197,22 +204,30 @@ impl Server {
     fn apply_notification(&mut self, notification: Notification) {
         match notification.method.as_str() {
             DidOpenTextDocument::METHOD => {
-                if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notification.params) {
+                if let Ok(params) =
+                    serde_json::from_value::<DidOpenTextDocumentParams>(notification.params)
+                {
                     self.on_open(params);
                 }
             }
             DidChangeTextDocument::METHOD => {
-                if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(notification.params) {
+                if let Ok(params) =
+                    serde_json::from_value::<DidChangeTextDocumentParams>(notification.params)
+                {
                     self.on_change(params);
                 }
             }
             DidCloseTextDocument::METHOD => {
-                if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notification.params) {
+                if let Ok(params) =
+                    serde_json::from_value::<DidCloseTextDocumentParams>(notification.params)
+                {
                     self.on_close(params);
                 }
             }
             DidChangeWatchedFiles::METHOD => {
-                if let Ok(params) = serde_json::from_value::<DidChangeWatchedFilesParams>(notification.params) {
+                if let Ok(params) =
+                    serde_json::from_value::<DidChangeWatchedFilesParams>(notification.params)
+                {
                     self.on_watched_files(params);
                 }
             }
@@ -239,7 +254,10 @@ impl Server {
         let options = DidChangeWatchedFilesRegistrationOptions {
             watchers: Language::watch_globs()
                 .into_iter()
-                .map(|glob| FileSystemWatcher { glob_pattern: GlobPattern::String(glob), kind: None })
+                .map(|glob| FileSystemWatcher {
+                    glob_pattern: GlobPattern::String(glob),
+                    kind: None,
+                })
                 .collect(),
         };
         let params = RegistrationParams {
@@ -279,7 +297,9 @@ impl Server {
         if self.workspace.is_open(&file_key(&uri)) {
             return;
         }
-        let Ok(metadata) = std::fs::metadata(path) else { return };
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return;
+        };
         if metadata.len() > MAX_FILE_BYTES {
             return;
         }
@@ -293,8 +313,12 @@ impl Server {
         let document = params.text_document;
         let path = uri_to_path(&document.uri);
         if let Some(language) = Language::detect(Some(&document.language_id), path.as_deref()) {
-            self.workspace
-                .upsert(document.uri, document.text, language, Some(document.version));
+            self.workspace.upsert(
+                document.uri,
+                document.text,
+                language,
+                Some(document.version),
+            );
         }
     }
 
@@ -333,9 +357,16 @@ impl Server {
 
     fn on_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
         for event in params.changes {
-            let Some(path) = uri_to_path(&event.uri) else { continue };
-            let Some(language) = Language::detect(None, Some(&path)) else { continue };
-            if path.components().any(|part| part.as_os_str() == "node_modules") {
+            let Some(path) = uri_to_path(&event.uri) else {
+                continue;
+            };
+            let Some(language) = Language::detect(None, Some(&path)) else {
+                continue;
+            };
+            if path
+                .components()
+                .any(|part| part.as_os_str() == "node_modules")
+            {
                 continue;
             }
             let key = file_key(&event.uri);
@@ -368,12 +399,18 @@ impl Server {
             other => {
                 let message = format!("method not supported: {other}");
                 let code = ErrorCode::MethodNotFound as i32;
-                vec![Message::Response(Response::new_err(request.id, code, message))]
+                vec![Message::Response(Response::new_err(
+                    request.id, code, message,
+                ))]
             }
         }
     }
 
-    fn dispatch<R>(&self, request: Request, handler: fn(&Self, R::Params) -> R::Result) -> Vec<Message>
+    fn dispatch<R>(
+        &self,
+        request: Request,
+        handler: fn(&Self, R::Params) -> R::Result,
+    ) -> Vec<Message>
     where
         R: LspRequest,
         R::Params: DeserializeOwned,
@@ -418,7 +455,10 @@ impl Server {
                 CompletionItem {
                     label: name.to_owned(),
                     kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(format!("{rule_count} rule{}", if rule_count == 1 { "" } else { "s" })),
+                    detail: Some(format!(
+                        "{rule_count} rule{}",
+                        if rule_count == 1 { "" } else { "s" }
+                    )),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range,
                         new_text: name.to_owned(),
@@ -434,7 +474,9 @@ impl Server {
         let id = self.occurrence_under_cursor(&params.text_document_position_params)?;
         let (file, occurrence) = self.workspace.resolve(id)?;
         let raw_name = file.text.get(occurrence.name_span.range())?;
-        let definitions = self.workspace.occurrences_named(Role::Definition, occurrence.name);
+        let definitions = self
+            .workspace
+            .occurrences_named(Role::Definition, occurrence.name);
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -447,7 +489,10 @@ impl Server {
     fn definition(&self, params: GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
         let id = self.occurrence_under_cursor(&params.text_document_position_params)?;
         let (_, occurrence) = self.workspace.resolve(id)?;
-        let locations = self.locations(self.workspace.occurrences_named(Role::Definition, occurrence.name));
+        let locations = self.locations(
+            self.workspace
+                .occurrences_named(Role::Definition, occurrence.name),
+        );
         (!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations))
     }
 
@@ -456,11 +501,25 @@ impl Server {
         let (_, occurrence) = self.workspace.resolve(id)?;
         let mut found = Vec::new();
         if params.context.include_declaration {
-            found.extend(self.locations(self.workspace.occurrences_named(Role::Definition, occurrence.name)));
+            found.extend(
+                self.locations(
+                    self.workspace
+                        .occurrences_named(Role::Definition, occurrence.name),
+                ),
+            );
         }
-        found.extend(self.locations(self.workspace.occurrences_named(Role::Usage, occurrence.name)));
+        found.extend(
+            self.locations(
+                self.workspace
+                    .occurrences_named(Role::Usage, occurrence.name),
+            ),
+        );
         found.sort_by_key(|location| {
-            (location.uri.as_str().to_owned(), location.range.start.line, location.range.start.character)
+            (
+                location.uri.as_str().to_owned(),
+                location.range.start.line,
+                location.range.start.character,
+            )
         });
         Some(found)
     }
@@ -489,7 +548,10 @@ impl Server {
                 continue;
             };
             let file_name = uri_to_path(&file.uri)
-                .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+                .and_then(|path| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
                 .unwrap_or_else(|| file.uri.as_str().to_owned());
             let line = file
                 .line_index
@@ -500,7 +562,11 @@ impl Server {
             for context in self.workspace.context_names(file, occurrence) {
                 markdown.push_str(&format!(" · `{context}`"));
             }
-            let rule = file.text.get(occurrence.rule_span.range()).unwrap_or("").trim();
+            let rule = file
+                .text
+                .get(occurrence.rule_span.range())
+                .unwrap_or("")
+                .trim();
             let rule = match rule.char_indices().nth(MAX_HOVER_RULE_CHARS) {
                 Some((end, _)) => format!("{}…", rule.get(..end).unwrap_or(rule)),
                 None => rule.to_owned(),
@@ -528,9 +594,15 @@ mod tests {
     #[test]
     fn catch_panic_returns_the_message() {
         assert_eq!(catch_panic(|| 7), Ok(7));
-        assert_eq!(catch_panic(|| -> u32 { panic!("static message") }), Err("static message".to_owned()));
+        assert_eq!(
+            catch_panic(|| -> u32 { panic!("static message") }),
+            Err("static message".to_owned())
+        );
         let formatted = format!("formatted {}", 5);
-        assert_eq!(catch_panic(move || -> u32 { panic!("{formatted}") }), Err("formatted 5".to_owned()));
+        assert_eq!(
+            catch_panic(move || -> u32 { panic!("{formatted}") }),
+            Err("formatted 5".to_owned())
+        );
     }
 
     #[test]

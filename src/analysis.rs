@@ -17,7 +17,10 @@ pub struct Span {
 
 impl Span {
     pub fn of(range: Range<usize>) -> Self {
-        Self { start: range.start as u32, end: range.end as u32 }
+        Self {
+            start: range.start as u32,
+            end: range.end as u32,
+        }
     }
 
     pub fn range(self) -> Range<usize> {
@@ -26,7 +29,10 @@ impl Span {
 
     /// The same span moved `offset` bytes later (for text analyzed as a slice of a larger file).
     pub fn shifted(self, offset: u32) -> Self {
-        Self { start: self.start + offset, end: self.end + offset }
+        Self {
+            start: self.start + offset,
+            end: self.end + offset,
+        }
     }
 }
 
@@ -87,7 +93,14 @@ pub struct FileAnalysis {
 }
 
 impl FileAnalysis {
-    pub fn add(&mut self, role: Role, name: NameId, name_span: Span, rule_span: Span, context: &[NameId]) {
+    pub fn add(
+        &mut self,
+        role: Role,
+        name: NameId,
+        name_span: Span,
+        rule_span: Span,
+        context: &[NameId],
+    ) {
         let context_start = self.context_start_for(context);
         self.occurrences.push(Occurrence {
             role,
@@ -101,7 +114,14 @@ impl FileAnalysis {
     }
 
     /// Like `add`, for CSS embedded in a document: only this file sees it.
-    pub fn add_private(&mut self, role: Role, name: NameId, name_span: Span, rule_span: Span, context: &[NameId]) {
+    pub fn add_private(
+        &mut self,
+        role: Role,
+        name: NameId,
+        name_span: Span,
+        rule_span: Span,
+        context: &[NameId],
+    ) {
         self.add(role, name, name_span, rule_span, context);
         if let Some(last) = self.occurrences.last_mut() {
             last.scope = Scope::Private;
@@ -122,7 +142,8 @@ impl FileAnalysis {
             .windows(2)
             .all(|pair| pair[0].name_span.start <= pair[1].name_span.start);
         if !sorted {
-            self.occurrences.sort_by_key(|occurrence| occurrence.name_span.start);
+            self.occurrences
+                .sort_by_key(|occurrence| occurrence.name_span.start);
         }
     }
 
@@ -191,14 +212,22 @@ mod tests {
         let mut analysis = FileAnalysis::default();
         analysis.add(Role::Definition, name, span, span, &[]);
         analysis.add_private(Role::Definition, name, span, span, &[]);
-        let scopes: Vec<Scope> = analysis.occurrences.iter().map(|occurrence| occurrence.scope).collect();
+        let scopes: Vec<Scope> = analysis
+            .occurrences
+            .iter()
+            .map(|occurrence| occurrence.scope)
+            .collect();
         assert_eq!(scopes, [Scope::Shared, Scope::Private]);
     }
 
     #[test]
     fn finish_sorts_by_position() {
         let (analysis, strings) = analysis_with(&[("late", 20, 24), ("early", 1, 6)]);
-        let names: Vec<&str> = analysis.occurrences.iter().map(|occurrence| strings.get(occurrence.name)).collect();
+        let names: Vec<&str> = analysis
+            .occurrences
+            .iter()
+            .map(|occurrence| strings.get(occurrence.name))
+            .collect();
         assert_eq!(names, ["early", "late"]);
     }
 
@@ -216,7 +245,10 @@ mod tests {
         analysis.add(Role::Definition, name, span, span, &[]);
         assert_eq!(analysis.contexts, vec![media, layer, media]);
         assert_eq!(analysis.context_of(&analysis.occurrences[1]), &[media]);
-        assert_eq!(analysis.context_of(&analysis.occurrences[2]), &[layer, media]);
+        assert_eq!(
+            analysis.context_of(&analysis.occurrences[2]),
+            &[layer, media]
+        );
         assert!(analysis.context_of(&analysis.occurrences[3]).is_empty());
     }
 }

@@ -14,7 +14,12 @@ fn all_fixtures() -> Vec<(String, String)> {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|e| e == "css"))
-        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(p).unwrap()))
+        .map(|p| {
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(p).unwrap(),
+            )
+        })
         .collect();
     out.sort();
     assert!(out.len() >= 10);
@@ -26,11 +31,24 @@ fn check(src: &str, defs: &[Observed], what: &str) {
     let mut prev_end = 0u32;
     for d in defs {
         let (s, e) = (d.name_span.start, d.name_span.end);
-        assert!(s < e && e as usize <= src.len(), "{what}: bad span {s}..{e} (len {})", src.len());
-        assert!(s >= prev_end, "{what}: spans overlap or are unsorted at {s}");
+        assert!(
+            s < e && e as usize <= src.len(),
+            "{what}: bad span {s}..{e} (len {})",
+            src.len()
+        );
+        assert!(
+            s >= prev_end,
+            "{what}: spans overlap or are unsorted at {s}"
+        );
         prev_end = e;
-        let raw = src.get(d.name_span.range()).unwrap_or_else(|| panic!("{what}: span {s}..{e} not on char boundaries"));
-        assert_eq!(d.name.as_str(), &*unescape_ident(raw), "{what}: name != unescape(raw) for {raw:?}");
+        let raw = src
+            .get(d.name_span.range())
+            .unwrap_or_else(|| panic!("{what}: span {s}..{e} not on char boundaries"));
+        assert_eq!(
+            d.name.as_str(),
+            &*unescape_ident(raw),
+            "{what}: name != unescape(raw) for {raw:?}"
+        );
         assert!(
             rule_span_ok(src, d),
             "{what}: rule span {:?} does not contain name span {:?}",
@@ -79,7 +97,11 @@ fn fixtures_satisfy_invariants_and_are_deterministic() {
     for (name, src) in all_fixtures() {
         let a = ix.observe(Language::Css, &src);
         check(&src, &a, &name);
-        assert_eq!(a, ix.observe(Language::Css, &src), "{name}: indexing twice differs");
+        assert_eq!(
+            a,
+            ix.observe(Language::Css, &src),
+            "{name}: indexing twice differs"
+        );
     }
 }
 
@@ -90,9 +112,17 @@ fn every_prefix_and_suffix_of_every_fixture() {
     for (name, src) in all_fixtures() {
         for (i, _) in src.char_indices().chain([(src.len(), ' ')]) {
             let prefix = &src[..i];
-            check(prefix, &ix.observe(Language::Css, prefix), &format!("{name} prefix {i}"));
+            check(
+                prefix,
+                &ix.observe(Language::Css, prefix),
+                &format!("{name} prefix {i}"),
+            );
             let suffix = &src[i..];
-            check(suffix, &ix.observe(Language::Css, suffix), &format!("{name} suffix {i}"));
+            check(
+                suffix,
+                &ix.observe(Language::Css, suffix),
+                &format!("{name} suffix {i}"),
+            );
         }
     }
 }

@@ -11,7 +11,10 @@ use lsp_types::*;
 
 fn site() -> (TempWorkspace, TestClient) {
     let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions { workspace: Some(ws.path().to_path_buf()), ..Default::default() });
+    let c = TestClient::start(ClientOptions {
+        workspace: Some(ws.path().to_path_buf()),
+        ..Default::default()
+    });
     (ws, c)
 }
 
@@ -45,7 +48,10 @@ fn linked_stylesheets_limit_what_html_can_see() {
 
     // No <link> at all: fall back to the whole workspace (stage 1 behavior).
     let all = labels(&mut c, &ws.uri("bare.html"), "<p class=\"$0\">", "html");
-    assert!(all.contains(&"card".to_owned()) && all.contains(&"page".to_owned()), "{all:?}");
+    assert!(
+        all.contains(&"card".to_owned()) && all.contains(&"page".to_owned()),
+        "{all:?}"
+    );
     c.shutdown();
 }
 
@@ -53,13 +59,19 @@ fn linked_stylesheets_limit_what_html_can_see() {
 #[ignore = "stage 4: @import"]
 fn import_chains_are_followed() {
     let (ws, mut c) = site();
-    ws.write("css/main.css", "@import \"styles.css\";\n@import url(\"./components.css\");\n.main-only { }\n");
+    ws.write(
+        "css/main.css",
+        "@import \"styles.css\";\n@import url(\"./components.css\");\n.main-only { }\n",
+    );
     // Exists in the workspace but is NOT reachable from main.css: must stay invisible.
     ws.write("css/unrelated.css", ".unrelated { }\n");
     c.notify::<notification::DidChangeWatchedFiles>(DidChangeWatchedFilesParams {
         changes: ["css/main.css", "css/unrelated.css"]
             .into_iter()
-            .map(|rel| FileEvent { uri: ws.uri(rel), typ: FileChangeType::CREATED })
+            .map(|rel| FileEvent {
+                uri: ws.uri(rel),
+                typ: FileChangeType::CREATED,
+            })
             .collect(),
     });
     let l = labels(
@@ -70,7 +82,17 @@ fn import_chains_are_followed() {
     );
     assert_eq!(
         l,
-        ["active", "btn", "btn-large", "card", "card-title", "home", "main-only", "page", "title"]
+        [
+            "active",
+            "btn",
+            "btn-large",
+            "card",
+            "card-title",
+            "home",
+            "main-only",
+            "page",
+            "title"
+        ]
     );
     c.shutdown();
 }
@@ -88,8 +110,16 @@ fn inline_style_blocks_define_classes_for_their_own_document() {
     // inside the <style> block
     assert_eq!(defs[0].range.start, Position::new(1, 1));
 
-    let other = labels(&mut c, &uri("file:///virtual/other.html"), "<p class=\"$0\">", "html");
-    assert!(!other.contains(&"only-here".to_owned()), "inline style leaked to other documents: {other:?}");
+    let other = labels(
+        &mut c,
+        &uri("file:///virtual/other.html"),
+        "<p class=\"$0\">",
+        "html",
+    );
+    assert!(
+        !other.contains(&"only-here".to_owned()),
+        "inline style leaked to other documents: {other:?}"
+    );
     c.shutdown();
 }
 
@@ -104,8 +134,16 @@ fn svelte_style_blocks_are_component_scoped() {
         "svelte",
     );
     assert!(a.contains(&"mine".to_owned()), "{a:?}");
-    let b = labels(&mut c, &uri("file:///virtual/B.svelte"), "<p class=\"$0\">", "svelte");
-    assert!(!b.contains(&"mine".to_owned()), "scoped class leaked into B: {b:?}");
+    let b = labels(
+        &mut c,
+        &uri("file:///virtual/B.svelte"),
+        "<p class=\"$0\">",
+        "svelte",
+    );
+    assert!(
+        !b.contains(&"mine".to_owned()),
+        "scoped class leaked into B: {b:?}"
+    );
     c.shutdown();
 }
 
@@ -120,12 +158,18 @@ fn vue_scoped_and_module_styles_are_component_local() {
         "vue",
     );
     assert!(a.contains(&"mine".to_owned()), "{a:?}");
-    let b = labels(&mut c, &uri("file:///virtual/B.vue"), "<template><p class=\"$0\"/></template>", "vue");
+    let b = labels(
+        &mut c,
+        &uri("file:///virtual/B.vue"),
+        "<template><p class=\"$0\"/></template>",
+        "vue",
+    );
     assert!(!b.contains(&"mine".to_owned()), "{b:?}");
 
     // CSS modules: `$style.name` resolves into the same file's <style module>.
     let u = uri("file:///virtual/M.vue");
-    let src = "<template><p :class=\"$style.boxed\"/></template>\n<style module>\n.boxed { }\n</style>";
+    let src =
+        "<template><p :class=\"$style.boxed\"/></template>\n<style module>\n.boxed { }\n</style>";
     c.open(&u, "vue", src);
     let defs = c.definition_locations(&u, position_of(src, "boxed\"", 2));
     assert_eq!((defs.len(), defs[0].uri.clone()), (1, u));

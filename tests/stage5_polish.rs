@@ -44,7 +44,11 @@ fn unknown_classes_in_html_are_warned_about() {
     assert_eq!(d[0].range, want);
 
     // Fixing the typo clears it.
-    c.change(&u, 2, &ws.read("index.html").replace("missing-class", "card"));
+    c.change(
+        &u,
+        2,
+        &ws.read("index.html").replace("missing-class", "card"),
+    );
     assert!(diagnostics_for(&mut c, &u).is_empty());
     c.shutdown();
 }
@@ -57,8 +61,15 @@ fn adding_the_missing_rule_clears_diagnostics_in_open_html() {
     c.open(&u, "html", &ws.read("index.html"));
     assert_eq!(diagnostics_for(&mut c, &u).len(), 1);
     let css = ws.uri("css/styles.css");
-    c.open(&css, "css", &(ws.read("css/styles.css") + ".missing-class { }\n"));
-    assert!(diagnostics_for(&mut c, &u).is_empty(), "html diagnostics must refresh when CSS changes");
+    c.open(
+        &css,
+        "css",
+        &(ws.read("css/styles.css") + ".missing-class { }\n"),
+    );
+    assert!(
+        diagnostics_for(&mut c, &u).is_empty(),
+        "html diagnostics must refresh when CSS changes"
+    );
     c.shutdown();
 }
 
@@ -71,7 +82,9 @@ fn workspace_symbol_searches_class_names() {
         work_done_progress_params: Default::default(),
         partial_result_params: Default::default(),
     });
-    let Some(WorkspaceSymbolResponse::Flat(mut syms)) = r else { panic!("expected flat symbols") };
+    let Some(WorkspaceSymbolResponse::Flat(mut syms)) = r else {
+        panic!("expected flat symbols")
+    };
     syms.sort_by(|a, b| a.name.cmp(&b.name));
     let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, [".card", ".card-title"]);
@@ -83,16 +96,20 @@ fn workspace_symbol_searches_class_names() {
 #[test]
 #[ignore = "stage 5: config"]
 fn ignore_globs_from_initialization_options_are_honored() {
-    let (_ws, mut c) = site_with(Some(serde_json::json!({ "ignore": ["css/components.css"] })));
+    let (_ws, mut c) = site_with(Some(
+        serde_json::json!({ "ignore": ["css/components.css"] }),
+    ));
     let u = uri("file:///virtual/t.html");
     let (text, pos) = parse_cursor("<p class=\"$0\">");
     c.open(&u, "html", &text);
-    let Some(CompletionResponse::Array(items)) = c.request::<request::Completion>(CompletionParams {
-        text_document_position: position_params(&u, pos),
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    }) else {
+    let Some(CompletionResponse::Array(items)) =
+        c.request::<request::Completion>(CompletionParams {
+            text_document_position: position_params(&u, pos),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        })
+    else {
         panic!("no completion")
     };
     let l: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
@@ -110,11 +127,19 @@ fn extra_class_attributes_and_helper_functions_are_configurable() {
     let h = uri("file:///virtual/t.html");
     let html = r#"<p data-cls="btn">"#;
     c.open(&h, "html", html);
-    assert_eq!(c.definition_locations(&h, position_of(html, "btn", 1)).len(), ws.expected_locations("btn").len());
+    assert_eq!(
+        c.definition_locations(&h, position_of(html, "btn", 1))
+            .len(),
+        ws.expected_locations("btn").len()
+    );
 
     let j = uri("file:///virtual/t.jsx");
     let jsx = r#"const x = tw("card");"#;
     c.open(&j, "javascriptreact", jsx);
-    assert_eq!(c.definition_locations(&j, position_of(jsx, "card", 1)).len(), 1);
+    assert_eq!(
+        c.definition_locations(&j, position_of(jsx, "card", 1))
+            .len(),
+        1
+    );
     c.shutdown();
 }

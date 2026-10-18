@@ -47,7 +47,10 @@ pub(super) fn analyze(src: &str, strings: &mut Strings, out: &mut FileAnalysis) 
     scanned
         .style_regions
         .iter()
-        .map(|span| Region { language: Language::Css, span: *span })
+        .map(|span| Region {
+            language: Language::Css,
+            span: *span,
+        })
         .collect()
 }
 
@@ -67,7 +70,9 @@ pub(super) fn class_context_at(src: &str, offset: usize) -> Option<ClassContext>
         let after_cursor = value_text.get(cursor..)?;
         let is_space = |ch: char| ch.is_ascii_whitespace();
         let token_start = before_cursor.rfind(is_space).map_or(0, |index| index + 1);
-        let token_end = after_cursor.find(is_space).map_or(value_text.len(), |index| cursor + index);
+        let token_end = after_cursor
+            .find(is_space)
+            .map_or(value_text.len(), |index| cursor + index);
         return Some(ClassContext {
             replace: Span::of(value_start + token_start..value_start + token_end),
             prefix: Span::of(value_start + token_start..offset),
@@ -77,7 +82,9 @@ pub(super) fn class_context_at(src: &str, offset: usize) -> Option<ClassContext>
 }
 
 fn is_opaque(value: &str) -> bool {
-    ["{{", "{%", "<%", "<?"].iter().any(|marker| value.contains(marker))
+    ["{{", "{%", "<%", "<?"]
+        .iter()
+        .any(|marker| value.contains(marker))
 }
 
 /// Whitespace-separated tokens with their byte offsets within `text`.
@@ -85,7 +92,10 @@ fn tokens(text: &str) -> impl Iterator<Item = (usize, &str)> {
     let mut position = 0;
     std::iter::from_fn(move || {
         let rest = text.get(position..)?;
-        let skipped = rest.len() - rest.trim_start_matches(|ch: char| ch.is_ascii_whitespace()).len();
+        let skipped = rest.len()
+            - rest
+                .trim_start_matches(|ch: char| ch.is_ascii_whitespace())
+                .len();
         let start = position + skipped;
         let token_text = text.get(start..)?;
         if token_text.is_empty() {
@@ -216,7 +226,8 @@ fn scan_document(src: &str) -> Scan {
                 }
                 Some(_) => {
                     let value_start = scan;
-                    while scan < length && !bytes[scan].is_ascii_whitespace() && bytes[scan] != b'>' {
+                    while scan < length && !bytes[scan].is_ascii_whitespace() && bytes[scan] != b'>'
+                    {
                         scan += 1;
                     }
                     Some(Span::of(value_start..scan))
@@ -316,7 +327,10 @@ mod tests {
             (r#"<link href="a.css" rel="stylesheet">"#, &["a.css"]),
             (r#"<LINK REL="Stylesheet" HREF="a.css"/>"#, &["a.css"]),
             ("<link rel=stylesheet href=a.css>", &["a.css"]),
-            (r#"<link rel="alternate stylesheet" href="a.css">"#, &["a.css"]),
+            (
+                r#"<link rel="alternate stylesheet" href="a.css">"#,
+                &["a.css"],
+            ),
             (r#"<link rel="icon" href="favicon.ico">"#, &[]),
             (r#"<link rel="stylesheet">"#, &[]),
             (r#"<link rel="stylesheet" href="">"#, &[]),
@@ -335,7 +349,10 @@ mod tests {
         let source = r#"<link rel="stylesheet" href="css/site.css">"#;
         let (out, _, _) = run(source);
         assert_eq!(out.imports.len(), 1);
-        assert_eq!(source.get(out.imports[0].span.range()), Some("css/site.css"));
+        assert_eq!(
+            source.get(out.imports[0].span.range()),
+            Some("css/site.css")
+        );
     }
 
     #[test]
@@ -356,7 +373,10 @@ mod tests {
             [".a { }", ".b { }"]
         );
         assert_eq!(style_texts("<style></style>"), Vec::<String>::new());
-        assert_eq!(style_texts("<!-- <style>.a { }</style> -->"), Vec::<String>::new());
+        assert_eq!(
+            style_texts("<!-- <style>.a { }</style> -->"),
+            Vec::<String>::new()
+        );
         assert_eq!(style_texts("<style>.typing { "), [".typing { "]);
     }
 

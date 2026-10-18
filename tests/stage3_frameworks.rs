@@ -10,15 +10,29 @@ use lsp_types::*;
 
 fn site() -> (TempWorkspace, TestClient) {
     let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions { workspace: Some(ws.path().to_path_buf()), ..Default::default() });
+    let c = TestClient::start(ClientOptions {
+        workspace: Some(ws.path().to_path_buf()),
+        ..Default::default()
+    });
     (ws, c)
 }
 
 /// Go-to-definition from `needle` (cursor 1 char in) must land on every CSS rule of `class`.
-fn assert_resolves(c: &mut TestClient, ws: &TempWorkspace, doc: &Uri, text: &str, needle: &str, class: &str) {
+fn assert_resolves(
+    c: &mut TestClient,
+    ws: &TempWorkspace,
+    doc: &Uri,
+    text: &str,
+    needle: &str,
+    class: &str,
+) {
     let mut got = c.definition_locations(doc, position_of(text, needle, 1));
     sort_locations(&mut got);
-    assert_eq!(got, ws.expected_locations(class), "`{needle}` should resolve to .{class}");
+    assert_eq!(
+        got,
+        ws.expected_locations(class),
+        "`{needle}` should resolve to .{class}"
+    );
 }
 
 fn complete_labels(c: &mut TestClient, u: &Uri, marked: &str, lang: &str) -> Vec<String> {
@@ -71,8 +85,14 @@ fn jsx_class_name_attribute_and_helper_calls_resolve() {
     // `class` also works in JSX
     assert_resolves(&mut c, &ws, &u, JSX, "\"card-title\"", "card-title");
     // Not class positions:
-    assert!(c.definition(&u, position_of(JSX, r#"id="btn-large"#, 6)).is_none());
-    assert!(c.definition(&u, position_of(JSX, r#"data-x="page"#, 9)).is_none());
+    assert!(
+        c.definition(&u, position_of(JSX, r#"id="btn-large"#, 6))
+            .is_none()
+    );
+    assert!(
+        c.definition(&u, position_of(JSX, r#"data-x="page"#, 9))
+            .is_none()
+    );
     c.shutdown();
 }
 
@@ -80,14 +100,40 @@ fn jsx_class_name_attribute_and_helper_calls_resolve() {
 #[ignore = "stage 3: jsx"]
 fn jsx_completion_inside_class_name_strings_only() {
     let (_ws, mut c) = site();
-    let l = complete_labels(&mut c, &uri("file:///virtual/A.tsx"), r#"const a = <p className="ca$0" />;"#, "typescriptreact");
+    let l = complete_labels(
+        &mut c,
+        &uri("file:///virtual/A.tsx"),
+        r#"const a = <p className="ca$0" />;"#,
+        "typescriptreact",
+    );
     assert!(l.contains(&"card".to_owned()), "{l:?}");
-    let l = complete_labels(&mut c, &uri("file:///virtual/B.tsx"), r#"const a = <p title="ca$0" />;"#, "typescriptreact");
+    let l = complete_labels(
+        &mut c,
+        &uri("file:///virtual/B.tsx"),
+        r#"const a = <p title="ca$0" />;"#,
+        "typescriptreact",
+    );
     assert!(l.is_empty(), "title is not a class attribute: {l:?}");
-    let l = complete_labels(&mut c, &uri("file:///virtual/C.tsx"), r#"const a = clsx("a", "ca$0");"#, "typescriptreact");
-    assert!(l.contains(&"card".to_owned()), "clsx args are class positions: {l:?}");
-    let l = complete_labels(&mut c, &uri("file:///virtual/D.tsx"), r#"const a = other("ca$0");"#, "typescriptreact");
-    assert!(l.is_empty(), "arbitrary calls are not class positions: {l:?}");
+    let l = complete_labels(
+        &mut c,
+        &uri("file:///virtual/C.tsx"),
+        r#"const a = clsx("a", "ca$0");"#,
+        "typescriptreact",
+    );
+    assert!(
+        l.contains(&"card".to_owned()),
+        "clsx args are class positions: {l:?}"
+    );
+    let l = complete_labels(
+        &mut c,
+        &uri("file:///virtual/D.tsx"),
+        r#"const a = other("ca$0");"#,
+        "typescriptreact",
+    );
+    assert!(
+        l.is_empty(),
+        "arbitrary calls are not class positions: {l:?}"
+    );
     c.shutdown();
 }
 
@@ -98,9 +144,16 @@ fn jsx_usages_show_up_in_references_from_css() {
     let u = uri("file:///virtual/App.jsx");
     c.open(&u, "javascriptreact", JSX);
     let refs = c
-        .references(&ws.uri("css/styles.css"), ws.cursor_on("css/styles.css", "page", 0, 1), true)
+        .references(
+            &ws.uri("css/styles.css"),
+            ws.cursor_on("css/styles.css", "page", 0, 1),
+            true,
+        )
         .unwrap();
-    assert!(refs.iter().any(|l| l.uri == u), "jsx usage missing from {refs:?}");
+    assert!(
+        refs.iter().any(|l| l.uri == u),
+        "jsx usage missing from {refs:?}"
+    );
     c.shutdown();
 }
 
@@ -129,7 +182,10 @@ fn svelte_class_attribute_mixed_content_and_directives_resolve() {
     assert_resolves(&mut c, &ws, &u, SVELTE, "'home'", "home");
     assert_resolves(&mut c, &ws, &u, SVELTE, "'btn-large'", "btn-large");
     // The JS variable in `{active ? ...}` and the <script> are not classes.
-    assert!(c.definition(&u, position_of(SVELTE, "let active", 6)).is_none());
+    assert!(
+        c.definition(&u, position_of(SVELTE, "let active", 6))
+            .is_none()
+    );
     c.shutdown();
 }
 
@@ -137,7 +193,12 @@ fn svelte_class_attribute_mixed_content_and_directives_resolve() {
 #[ignore = "stage 3: svelte"]
 fn svelte_class_directive_completion() {
     let (_ws, mut c) = site();
-    let l = complete_labels(&mut c, &uri("file:///virtual/D.svelte"), "<div class:ca$0={x}>", "svelte");
+    let l = complete_labels(
+        &mut c,
+        &uri("file:///virtual/D.svelte"),
+        "<div class:ca$0={x}>",
+        "svelte",
+    );
     assert!(l.contains(&"card".to_owned()), "{l:?}");
     c.shutdown();
 }

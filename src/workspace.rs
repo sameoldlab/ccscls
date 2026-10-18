@@ -113,7 +113,13 @@ impl Workspace {
     }
 
     /// Insert or replace a file, re-indexing it.
-    pub fn upsert(&mut self, uri: Uri, text: String, language: Language, open_version: Option<i32>) {
+    pub fn upsert(
+        &mut self,
+        uri: Uri,
+        text: String,
+        language: Language,
+        open_version: Option<i32>,
+    ) {
         let key = file_key(&uri);
         let mut analysis = FileAnalysis::default();
         language.analyze(&mut self.engines, &text, &mut self.strings, &mut analysis);
@@ -130,7 +136,10 @@ impl Workspace {
             return;
         };
         slot.generation = slot.generation.wrapping_add(1);
-        let file = FileId { index: slot_index, generation: slot.generation };
+        let file = FileId {
+            index: slot_index,
+            generation: slot.generation,
+        };
         let occurrence_count = analysis.occurrences.len();
         slot.entry = Some(FileEntry {
             uri,
@@ -143,7 +152,10 @@ impl Workspace {
         });
         self.ids.insert(key, file);
         for index in 0..occurrence_count {
-            self.link(OccurrenceId { file, index: index as u32 });
+            self.link(OccurrenceId {
+                file,
+                index: index as u32,
+            });
         }
     }
 
@@ -170,7 +182,10 @@ impl Workspace {
 
     /// The current handle for the file with this key.
     pub fn file_id(&self, key: &str) -> Option<FileId> {
-        self.ids.get(key).copied().filter(|id| self.file(*id).is_some())
+        self.ids
+            .get(key)
+            .copied()
+            .filter(|id| self.file(*id).is_some())
     }
 
     pub fn file_by_key(&self, key: &str) -> Option<&FileEntry> {
@@ -182,8 +197,15 @@ impl Workspace {
         self.slots
             .iter()
             .enumerate()
-            .filter(|(_, slot)| slot.entry.as_ref().is_some_and(|entry| entry.open_version.is_some()))
-            .map(|(index, slot)| FileId { index: index as u32, generation: slot.generation })
+            .filter(|(_, slot)| {
+                slot.entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.open_version.is_some())
+            })
+            .map(|(index, slot)| FileId {
+                index: index as u32,
+                generation: slot.generation,
+            })
             .collect()
     }
 
@@ -193,7 +215,8 @@ impl Workspace {
     }
 
     pub fn is_open(&self, key: &str) -> bool {
-        self.file_by_key(key).is_some_and(|file| file.open_version.is_some())
+        self.file_by_key(key)
+            .is_some_and(|file| file.open_version.is_some())
     }
 
     pub fn file_count(&self) -> usize {
@@ -215,7 +238,10 @@ impl Workspace {
     pub fn occurrence_at(&self, key: &str, offset: usize) -> Option<OccurrenceId> {
         let file = *self.ids.get(key)?;
         let index = self.file(file)?.analysis.occurrence_at(offset)?;
-        Some(OccurrenceId { file, index: index as u32 })
+        Some(OccurrenceId {
+            file,
+            index: index as u32,
+        })
     }
 
     /// Every occurrence of `name` with this role, ordered by (uri, position).
@@ -275,7 +301,10 @@ impl Workspace {
         if let Some(index) = self.free_slots.pop() {
             return index;
         }
-        self.slots.push(Slot { generation: 0, entry: None });
+        self.slots.push(Slot {
+            generation: 0,
+            entry: None,
+        });
         (self.slots.len() - 1) as u32
     }
 
@@ -306,7 +335,11 @@ impl Workspace {
         if slot.generation != id.file.generation {
             return;
         }
-        if let Some(links) = slot.entry.as_mut().and_then(|entry| entry.links.get_mut(id.index as usize)) {
+        if let Some(links) = slot
+            .entry
+            .as_mut()
+            .and_then(|entry| entry.links.get_mut(id.index as usize))
+        {
             change(links);
         }
     }
@@ -329,7 +362,12 @@ impl Workspace {
         let old_head = list.head;
         list.head = Some(id);
         list.count += 1;
-        self.update_links(id, |links| *links = Links { previous: None, next: old_head });
+        self.update_links(id, |links| {
+            *links = Links {
+                previous: None,
+                next: old_head,
+            }
+        });
         if let Some(old_head) = old_head {
             self.update_links(old_head, |links| links.previous = Some(id));
         }
@@ -365,9 +403,14 @@ impl Workspace {
     }
 
     fn unlink_file(&mut self, file: FileId) {
-        let count = self.file(file).map_or(0, |entry| entry.analysis.occurrences.len());
+        let count = self
+            .file(file)
+            .map_or(0, |entry| entry.analysis.occurrences.len());
         for index in 0..count {
-            self.unlink(OccurrenceId { file, index: index as u32 });
+            self.unlink(OccurrenceId {
+                file,
+                index: index as u32,
+            });
         }
     }
 }
@@ -378,37 +421,60 @@ impl Workspace {
     fn assert_consistent(&self) {
         for (name_index, lists) in self.names.iter().enumerate() {
             let name = NameId::from_index(name_index);
-            for (role, list) in [(Role::Definition, lists.definitions), (Role::Usage, lists.usages)] {
+            for (role, list) in [
+                (Role::Definition, lists.definitions),
+                (Role::Usage, lists.usages),
+            ] {
                 let mut walked = Vec::new();
                 let mut previous = None;
                 let mut cursor = list.head;
                 while let Some(id) = cursor {
                     let (_, occurrence) = self.resolve(id).expect("list entries resolve");
-                    assert_eq!((occurrence.name, occurrence.role), (name, role), "wrong list for {id:?}");
+                    assert_eq!(
+                        (occurrence.name, occurrence.role),
+                        (name, role),
+                        "wrong list for {id:?}"
+                    );
                     let links = self.links_of(id).expect("links exist");
                     assert_eq!(links.previous, previous, "broken previous link at {id:?}");
                     walked.push(id);
-                    assert!(walked.len() <= list.count as usize, "list longer than its count");
+                    assert!(
+                        walked.len() <= list.count as usize,
+                        "list longer than its count"
+                    );
                     previous = Some(id);
                     cursor = links.next;
                 }
-                assert_eq!(walked.len(), list.count as usize, "count mismatch for name {name_index}");
+                assert_eq!(
+                    walked.len(),
+                    list.count as usize,
+                    "count mismatch for name {name_index}"
+                );
 
                 let mut scanned = Vec::new();
                 for (&_, &file) in self.ids.iter() {
                     let entry = self.file(file).expect("live file");
                     for (index, occurrence) in entry.analysis.occurrences.iter().enumerate() {
-                        let is_private_definition =
-                            occurrence.role == Role::Definition && occurrence.scope == Scope::Private;
-                        if occurrence.name == name && occurrence.role == role && !is_private_definition {
-                            scanned.push(OccurrenceId { file, index: index as u32 });
+                        let is_private_definition = occurrence.role == Role::Definition
+                            && occurrence.scope == Scope::Private;
+                        if occurrence.name == name
+                            && occurrence.role == role
+                            && !is_private_definition
+                        {
+                            scanned.push(OccurrenceId {
+                                file,
+                                index: index as u32,
+                            });
                         }
                     }
                 }
                 let mut walked_sorted = walked.clone();
                 walked_sorted.sort_by_key(|id| (id.file.index, id.index));
                 scanned.sort_by_key(|id| (id.file.index, id.index));
-                assert_eq!(walked_sorted, scanned, "list differs from a scan for name {name_index}");
+                assert_eq!(
+                    walked_sorted, scanned,
+                    "list differs from a scan for name {name_index}"
+                );
             }
         }
     }
@@ -433,7 +499,12 @@ mod tests {
     #[test]
     fn upsert_replaces_and_unlinks_stale_names() {
         let mut workspace = Workspace::new();
-        workspace.upsert(uri("file:///w/a.css"), ".x {} .y {}".into(), Language::Css, None);
+        workspace.upsert(
+            uri("file:///w/a.css"),
+            ".x {} .y {}".into(),
+            Language::Css,
+            None,
+        );
         workspace.upsert(uri("file:///w/b.css"), ".x {}".into(), Language::Css, None);
         assert_eq!(names_of(&workspace, Role::Definition, "x"), 2);
 
@@ -449,15 +520,29 @@ mod tests {
     fn definitions_and_usages_are_separate_lists() {
         let mut workspace = Workspace::new();
         workspace.upsert(uri("file:///w/a.css"), ".x {}".into(), Language::Css, None);
-        workspace.upsert(uri("file:///w/i.html"), r#"<p class="x y">"#.into(), Language::Html, None);
+        workspace.upsert(
+            uri("file:///w/i.html"),
+            r#"<p class="x y">"#.into(),
+            Language::Html,
+            None,
+        );
         assert_eq!(names_of(&workspace, Role::Definition, "x"), 1);
         assert_eq!(names_of(&workspace, Role::Usage, "x"), 1);
         assert_eq!(names_of(&workspace, Role::Usage, "y"), 1);
         assert_eq!(names_of(&workspace, Role::Definition, "y"), 0);
-        let names: Vec<&str> = workspace.class_names().iter().map(|(id, _)| workspace.name(*id)).collect();
+        let names: Vec<&str> = workspace
+            .class_names()
+            .iter()
+            .map(|(id, _)| workspace.name(*id))
+            .collect();
         assert_eq!(names, ["x"]);
 
-        workspace.upsert(uri("file:///w/i.html"), r#"<p class="y">"#.into(), Language::Html, None);
+        workspace.upsert(
+            uri("file:///w/i.html"),
+            r#"<p class="y">"#.into(),
+            Language::Html,
+            None,
+        );
         assert_eq!(names_of(&workspace, Role::Usage, "x"), 0);
         workspace.assert_consistent();
     }
@@ -466,13 +551,23 @@ mod tests {
     fn private_definitions_stay_out_of_the_shared_lists() {
         let mut workspace = Workspace::new();
         let page = "<style>.only { }</style><p class=\"only\">";
-        workspace.upsert(uri("file:///w/page.html"), page.into(), Language::Html, None);
+        workspace.upsert(
+            uri("file:///w/page.html"),
+            page.into(),
+            Language::Html,
+            None,
+        );
         assert_eq!(names_of(&workspace, Role::Definition, "only"), 0);
         assert_eq!(names_of(&workspace, Role::Usage, "only"), 1);
         assert!(workspace.class_names().is_empty());
         workspace.assert_consistent();
 
-        workspace.upsert(uri("file:///w/page.html"), "<p>".into(), Language::Html, None);
+        workspace.upsert(
+            uri("file:///w/page.html"),
+            "<p>".into(),
+            Language::Html,
+            None,
+        );
         workspace.assert_consistent();
         workspace.remove("/w/page.html");
         workspace.assert_consistent();
@@ -482,14 +577,19 @@ mod tests {
     fn removing_a_file_frees_its_slot_and_invalidates_old_handles() {
         let mut workspace = Workspace::new();
         workspace.upsert(uri("file:///w/a.css"), ".x {}".into(), Language::Css, None);
-        let old_handle = workspace.occurrence_at("/w/a.css", 1).expect("class under cursor");
+        let old_handle = workspace
+            .occurrence_at("/w/a.css", 1)
+            .expect("class under cursor");
         assert!(workspace.remove("/w/a.css"));
         assert!(!workspace.remove("/w/a.css"));
         assert_eq!(names_of(&workspace, Role::Definition, "x"), 0);
 
         workspace.upsert(uri("file:///w/b.css"), ".q {}".into(), Language::Css, None);
         assert_eq!(workspace.slots.len(), 1, "slot reused, not appended");
-        assert!(workspace.resolve(old_handle).is_none(), "stale handle must not reach the new file");
+        assert!(
+            workspace.resolve(old_handle).is_none(),
+            "stale handle must not reach the new file"
+        );
         workspace.assert_consistent();
     }
 
@@ -497,17 +597,39 @@ mod tests {
     fn reindexing_a_file_invalidates_handles_into_its_old_contents() {
         let mut workspace = Workspace::new();
         workspace.upsert(uri("file:///w/a.css"), ".x {}".into(), Language::Css, None);
-        let before = workspace.occurrence_at("/w/a.css", 1).expect("class under cursor");
-        workspace.upsert(uri("file:///w/a.css"), ".y {}".into(), Language::Css, Some(1));
+        let before = workspace
+            .occurrence_at("/w/a.css", 1)
+            .expect("class under cursor");
+        workspace.upsert(
+            uri("file:///w/a.css"),
+            ".y {}".into(),
+            Language::Css,
+            Some(1),
+        );
         assert!(workspace.resolve(before).is_none());
-        assert!(workspace.occurrence_at("/w/a.css", 1).and_then(|id| workspace.resolve(id)).is_some());
+        assert!(
+            workspace
+                .occurrence_at("/w/a.css", 1)
+                .and_then(|id| workspace.resolve(id))
+                .is_some()
+        );
     }
 
     #[test]
     fn same_file_two_uri_spellings_is_one_entry() {
         let mut workspace = Workspace::new();
-        workspace.upsert(uri("file:///w/a%20b.css"), ".x {}".into(), Language::Css, None);
-        workspace.upsert(uri("file:///w/a%20b.css"), ".y {}".into(), Language::Css, Some(1));
+        workspace.upsert(
+            uri("file:///w/a%20b.css"),
+            ".x {}".into(),
+            Language::Css,
+            None,
+        );
+        workspace.upsert(
+            uri("file:///w/a%20b.css"),
+            ".y {}".into(),
+            Language::Css,
+            Some(1),
+        );
         assert_eq!(workspace.file_count(), 1);
         assert!(workspace.is_open("/w/a b.css"));
     }
@@ -516,7 +638,12 @@ mod tests {
     fn occurrences_are_ordered_by_uri_then_position() {
         let mut workspace = Workspace::new();
         workspace.upsert(uri("file:///w/b.css"), ".x {}".into(), Language::Css, None);
-        workspace.upsert(uri("file:///w/a.css"), ".x {}\n.x:hover {}".into(), Language::Css, None);
+        workspace.upsert(
+            uri("file:///w/a.css"),
+            ".x {}\n.x:hover {}".into(),
+            Language::Css,
+            None,
+        );
         let name = workspace.strings.lookup("x").expect("interned");
         let order: Vec<(String, u32)> = workspace
             .occurrences_named(Role::Definition, name)
@@ -557,7 +684,11 @@ mod tests {
                 for _ in 0..next_number(8) {
                     source.push_str(&format!(".{} {{}}\n", vocabulary[next_number(5) as usize]));
                 }
-                let language = if next_number(4) == 0 { Language::Html } else { Language::Css };
+                let language = if next_number(4) == 0 {
+                    Language::Html
+                } else {
+                    Language::Css
+                };
                 if language == Language::Html {
                     source = format!(r#"<p class="{}">"#, vocabulary[next_number(5) as usize]);
                 }
