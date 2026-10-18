@@ -1,10 +1,9 @@
-//! Stage 5: diagnostics, workspace symbols, configuration. NOT IMPLEMENTED YET.
+//! Stage 5: workspace symbols and configuration that are not built yet.
 //! Run with `cargo test --test stage5_polish -- --ignored`.
 
 mod common;
 use common::*;
 use lsp_types::*;
-use std::time::Duration;
 
 fn site_with(init: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
     let ws = TempWorkspace::copy_fixture("site");
@@ -14,63 +13,6 @@ fn site_with(init: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
         ..Default::default()
     });
     (ws, c)
-}
-
-fn diagnostics_for(c: &mut TestClient, u: &Uri) -> Vec<Diagnostic> {
-    let n = c
-        .wait_notification("textDocument/publishDiagnostics", Duration::from_secs(2))
-        .expect("no publishDiagnostics notification");
-    let p: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
-    assert_eq!(&p.uri, u);
-    p.diagnostics
-}
-
-#[test]
-#[ignore = "stage 5: diagnostics"]
-fn unknown_classes_in_html_are_warned_about() {
-    let (ws, mut c) = site_with(None);
-    let u = ws.uri("index.html");
-    c.open(&u, "html", &ws.read("index.html"));
-    let d = diagnostics_for(&mut c, &u);
-    // only `missing-class`
-    assert_eq!(d.len(), 1, "{d:?}");
-    assert_eq!(d[0].severity, Some(DiagnosticSeverity::WARNING));
-    assert_eq!(d[0].source.as_deref(), Some("css-class-lsp"));
-    assert!(d[0].message.contains("missing-class"));
-    let (_, want) = expected_ranges_in(&ws.read("index.html"), Syntax::Html)
-        .into_iter()
-        .find(|(e, _)| e.name == "missing-class")
-        .unwrap();
-    assert_eq!(d[0].range, want);
-
-    // Fixing the typo clears it.
-    c.change(
-        &u,
-        2,
-        &ws.read("index.html").replace("missing-class", "card"),
-    );
-    assert!(diagnostics_for(&mut c, &u).is_empty());
-    c.shutdown();
-}
-
-#[test]
-#[ignore = "stage 5: diagnostics"]
-fn adding_the_missing_rule_clears_diagnostics_in_open_html() {
-    let (ws, mut c) = site_with(None);
-    let u = ws.uri("index.html");
-    c.open(&u, "html", &ws.read("index.html"));
-    assert_eq!(diagnostics_for(&mut c, &u).len(), 1);
-    let css = ws.uri("css/styles.css");
-    c.open(
-        &css,
-        "css",
-        &(ws.read("css/styles.css") + ".missing-class { }\n"),
-    );
-    assert!(
-        diagnostics_for(&mut c, &u).is_empty(),
-        "html diagnostics must refresh when CSS changes"
-    );
-    c.shutdown();
 }
 
 #[test]
@@ -94,7 +36,7 @@ fn workspace_symbol_searches_class_names() {
 }
 
 #[test]
-#[ignore = "stage 5: config"]
+#[ignore = "stage 5: ignore globs"]
 fn ignore_globs_from_initialization_options_are_honored() {
     let (_ws, mut c) = site_with(Some(
         serde_json::json!({ "ignore": ["css/components.css"] }),
@@ -114,6 +56,29 @@ fn ignore_globs_from_initialization_options_are_honored() {
     };
     let l: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(!l.contains(&"card") && l.contains(&"btn"), "{l:?}");
+    c.shutdown();
+}
+
+#[test]
+#[ignore = "stage 5: declared edges"]
+fn declared_edges_make_classes_verified_without_a_link() {
+    // "css/components.css applies to every page under the workspace root."
+    let (ws, mut c) = site_with(Some(serde_json::json!({
+        "declaredEdges": [{ "from": "**/*.html", "to": "css/components.css" }]
+    })));
+    let index = ws.uri("index.html");
+    let text = match c
+        .hover(&index, ws.cursor_on("index.html", "card", 0, 1))
+        .expect("hover")
+        .contents
+    {
+        HoverContents::Markup(m) => m.value,
+        other => panic!("unexpected {other:?}"),
+    };
+    assert!(
+        text.contains("declared: `index.html` → `components.css`"),
+        "{text}"
+    );
     c.shutdown();
 }
 

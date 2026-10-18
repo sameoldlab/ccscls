@@ -21,7 +21,9 @@ use lsp_types::Uri;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-pub use visibility::{Classification, Reach, Verdict};
+pub use visibility::{
+    Candidate, Classification, Reach, UsageVerdict, UsageVerdicts, Verdict, VisibleNames,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FileId {

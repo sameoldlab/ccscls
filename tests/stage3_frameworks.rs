@@ -232,3 +232,56 @@ fn vue_static_and_bound_class_attributes_resolve() {
     assert!(c.definition(&u, position_of(VUE, "=\"page\"", 3)).is_none());
     c.shutdown();
 }
+
+#[test]
+#[ignore = "stage 3: svelte scoped style"]
+fn svelte_style_blocks_are_component_scoped() {
+    let (_ws, mut c) = site();
+    let own = complete_labels(
+        &mut c,
+        &uri("file:///virtual/A.svelte"),
+        "<style>\n.mine { }\n</style>\n<p class=\"$0\">",
+        "svelte",
+    );
+    assert!(own.contains(&"mine".to_owned()), "{own:?}");
+    let other = complete_labels(
+        &mut c,
+        &uri("file:///virtual/B.svelte"),
+        "<p class=\"$0\">",
+        "svelte",
+    );
+    assert!(
+        !other.contains(&"mine".to_owned()),
+        "scoped class leaked into B: {other:?}"
+    );
+    c.shutdown();
+}
+
+#[test]
+#[ignore = "stage 3: vue scoped/module style"]
+fn vue_scoped_and_module_styles_are_component_local() {
+    let (_ws, mut c) = site();
+    let own = complete_labels(
+        &mut c,
+        &uri("file:///virtual/A.vue"),
+        "<template><p class=\"$0\"/></template>\n<style scoped>\n.mine { }\n</style>",
+        "vue",
+    );
+    assert!(own.contains(&"mine".to_owned()), "{own:?}");
+    let other = complete_labels(
+        &mut c,
+        &uri("file:///virtual/B.vue"),
+        "<template><p class=\"$0\"/></template>",
+        "vue",
+    );
+    assert!(!other.contains(&"mine".to_owned()), "{other:?}");
+
+    // CSS modules: `$style.name` resolves into the same file's <style module>.
+    let module = uri("file:///virtual/M.vue");
+    let source =
+        "<template><p :class=\"$style.boxed\"/></template>\n<style module>\n.boxed { }\n</style>";
+    c.open(&module, "vue", source);
+    let found = c.definition_locations(&module, position_of(source, "boxed\"", 2));
+    assert_eq!((found.len(), found[0].uri.clone()), (1, module));
+    c.shutdown();
+}

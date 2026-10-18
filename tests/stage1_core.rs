@@ -246,7 +246,7 @@ fn hover_on_html_usage_shows_the_rule() {
     assert_eq!(h.range, Some(want_range));
     assert_eq!(
         hover_text(Some(h)),
-        "**`.btn-large`** — 1 rule\n\n`styles.css:4`\n\n```css\n.btn-large { padding: 8px 16px }\n```"
+        "**`.btn-large`** — 1 rule\n\nlinked: `index.html` → `styles.css`\n\n`styles.css:4`\n\n```css\n.btn-large { padding: 8px 16px }\n```"
     );
     c.shutdown();
 }

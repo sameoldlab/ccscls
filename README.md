@@ -59,6 +59,10 @@ Each level uses the one below it as a trusted base.
   (`tests/common`, over `Connection::memory()`) drives the real server loop with real messages
   against `tests/fixtures/site` (copied to a temp dir). Expected locations are computed from the
   fixture annotations, independently of the server.
+* **Scenarios** (`tests/scenarios.rs`): each directory under `tests/fixtures/scenarios` is a tiny project.
+  Every class usage in its HTML carries `<!--v: btn=verified card=ambient ghost=undefined -->` and each
+  file says `<!--world: open -->` or `closed`. Verified means a chain of links/imports reaches a definition,
+  ambient means it is defined somewhere unlinked, undefined means nowhere.
 * **Level 3, process smoke** (`tests/stdio_smoke.rs`): spawns the binary, Content-Length framing,
   clean shutdown. One test.
 
@@ -73,7 +77,8 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
       mod.rs            detect, analyze, completion context, render name, watch globs
       css.rs            selectors -> definitions (tree-sitter-css), CSS escaping
       html.rs           class attributes -> usages (lexical scanner), cursor context
-    src/analysis.rs   language-neutral results: Occurrence, Role, Span, FileAnalysis
+    src/analysis.rs   language-neutral results: Occurrence, Role, Scope, Import, Span, FileAnalysis
+    src/config.rs     settings from initializationOptions (diagnostic severities)
     src/workspace.rs  files, generational handles, per-name occurrence lists
       workspace/visibility.rs   import graph, reach, verified/ambient/undefined verdicts
     src/strings.rs    interned string pool (NameId)

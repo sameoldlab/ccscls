@@ -17,8 +17,12 @@ Verification state, stated plainly:
   was edited). **They have not been run since.** The first `cargo test` on your machine is the real check.
   One compile error found along the way (`Observed` needed `PartialEq`) was fixed by inspection.
 - The toolchain is no longer used to verify in this environment; if something fails, send the output.
-- After that run, the whole first half of stage B (below) was written. It has **never been compiled**.
-  Expect the first `cargo test` to find typos; the pure parts have unit tests to localise them.
+- Stage B1 (the graph core and verdicts) was compiled and tested on your machine and works.
+- Stage B2 (below) was written after that and has **never been compiled**. Expect the first
+  `cargo test` to find typos; the pure parts have unit tests to localise them, and the LSP behaviour
+  has its own file of tests (`stage_b_visibility.rs`).
+- One existing assertion changed on purpose: the exact hover text for a class used in a page now
+  includes the "linked: ..." line (`stage1_core.rs`, `hover_on_html_usage_shows_the_rule`).
 
 What exists:
 
@@ -42,8 +46,9 @@ What exists:
 - The kak-lsp config snippet in the README is from memory and untested.
 - The string pool never reclaims names (a few bytes per distinct name ever seen).
 - Test code still has single-letter names (`c`, `u`); `src/` is clean.
-- Hover and definition on a class inside an inline `<style>` block do not see that block's private
-  definitions yet (the lists only hold shared ones); stage B2 routes those requests through `classify`.
+- Config is read once from `initializationOptions`; `workspace/didChangeConfiguration` is not handled.
+- Verdict-based completion and diagnostics are name-level: they do not yet consider whether a rule's
+  selector could match the element (that is stage E).
 
 ## 2. The central problem: false positives
 
@@ -138,10 +143,27 @@ kind) and the completion handler (hard-codes HTML).
   verified (with chain), ambient (with the files that define it) or undefined, plus `open_world`.
 - LSP behaviour is unchanged by B1.
 
-**B2 (LSP surface and specs): not started.** Completion ranks verified first and labels ambient (never
-drops it), hover shows the chain or "defined in X, no link from here", diagnostics (undefined = warning,
-ambient severity configurable), config (ambient severity, declared edges, ignore globs), and the rewrite
-of `tests/stage4_scoping.rs` plus new LSP-level scenarios annotated with verdicts.
+**B2 (LSP surface and specs): written, not yet compiled.**
+
+- Completion: linked classes first (`sortText` `0-name`, `labelDetails` showing the providing file), the
+  rest after (`1-name`, "not linked"), never dropped. The `detail` is still "N rules" (visible rules for a
+  linked class, all rules for an unlinked one).
+- Hover on a usage adds one line: `linked: a → b → c`, `defined in this file`, or `not linked from here:
+  defined in x` (with a caveat when the file may load CSS we cannot see). Undefined keeps the old
+  "no matching rule" text.
+- Definition, references and hover include the page's own `<style>` definitions.
+- Diagnostics (`publishDiagnostics`, open HTML only): `undefined-class` (default warning) and
+  `unlinked-class` (default hint). Nothing is reported for files with unknown CSS sources unless
+  `reportInOpenWorld` is set. Every open page is rechecked after any change, so editing a stylesheet
+  refreshes the pages that use it; closing a page clears its list.
+- Config from `initializationOptions`: `undefinedSeverity`, `ambientSeverity` (`off`, `hint`,
+  `information`, `warning`, `error`) and `reportInOpenWorld`. Unreadable options fall back to the
+  defaults and are logged.
+- Tests: `scenarios.rs` (annotated scenario workspaces, `<!--v: name=verdict -->` and
+  `<!--world: open -->` markers), `stage_b_visibility.rs` (LSP level), and unit tests in `config.rs`,
+  `workspace/visibility.rs` and `server.rs`.
+- Deferred to stage 5: declared edges and ignore globs (specs exist, ignored), reading config changes
+  after startup.
 
 Original plan for the whole stage:
 
@@ -200,8 +222,9 @@ Workspace symbols, config file, performance (async scan with a readiness signal)
 | `tests/stage1_core.rs` | stays (core loop) | none; must stay green through stage A |
 | `tests/stage2_rename.rs` | stage D | none for global rename |
 | `tests/stage3_frameworks.rs` | stage C | none |
-| `tests/stage4_scoping.rs` | stage B + C | rewrite: assert verified-first ranking and labeled ambient, not exclusion |
-| `tests/stage5_polish.rs` | stages B and F | diagnostics: undefined warning + configurable ambient; keep symbols/config |
+| `tests/stage_b_visibility.rs`, `tests/scenarios.rs` | stage B | replaces the old stage4 file; implemented |
+| `tests/stage3_frameworks.rs` | stage C | now also holds the Svelte/Vue scoped-style specs |
+| `tests/stage5_polish.rs` | stage F | workspace symbols, ignore globs, declared edges, class attributes (all ignored) |
 
 ## 5. Colour previews (research notes)
 

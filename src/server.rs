@@ -5,8 +5,9 @@
 //! index. (This is why the server is built on `lsp-server` rather than an
 //! async framework that may reorder notifications.)
 //!
-//! `Server` is plain state with no borrowed data: handlers take a request and
-//! return the messages to send, and only `run` touches the connection.
+//! `Server` is plain state with no borrowed data: handlers take a request or
+//! notification and return the messages to send, and only `run` touches the
+//! connection.
 //!
 //! Failure policy: the loop ends only on shutdown or a closed transport. A
 //! handler that panics is caught at the message boundary and answered with an
@@ -18,29 +19,32 @@
 //! Set `CSS_CLASS_LSP_LOG=1` to log every message and its handling time to stderr.
 
 use crate::analysis::{Role, Span};
+use crate::config::{Config, Severity};
 use crate::error::{Context, Result};
 use crate::languages::Language;
 use crate::uri::{file_key, path_to_uri, uri_to_path};
-use crate::workspace::{FileEntry, OccurrenceId, Workspace};
+use crate::workspace::{Classification, FileEntry, FileId, OccurrenceId, Verdict, Workspace};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
-    Notification as LspNotification,
+    Notification as LspNotification, PublishDiagnostics,
 };
 use lsp_types::request::{
     Completion, GotoDefinition, HoverRequest, References, Request as LspRequest,
 };
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    CompletionTextEdit, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
+    CompletionParams, CompletionResponse, CompletionTextEdit, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, FileChangeType, FileSystemWatcher, GlobPattern,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, Location, MarkupContent,
-    MarkupKind, OneOf, Range, ReferenceParams, Registration, RegistrationParams,
-    ServerCapabilities, ServerInfo, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit,
+    MarkupKind, NumberOrString, OneOf, PublishDiagnosticsParams, Range, ReferenceParams,
+    Registration, RegistrationParams, ServerCapabilities, ServerInfo, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Uri,
 };
+use rustc_hash::FxHashMap;
 use serde::{Serialize, de::DeserializeOwned};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -49,6 +53,8 @@ use std::time::Instant;
 const MAX_FILE_BYTES: u64 = 2_000_000;
 const MAX_HOVER_RULES: usize = 5;
 const MAX_HOVER_RULE_CHARS: usize = 2_000;
+const MAX_NAMED_FILES: usize = 3;
+const DIAGNOSTIC_SOURCE: &str = "css-class-lsp";
 
 pub fn capabilities() -> ServerCapabilities {
     ServerCapabilities {
@@ -128,7 +134,9 @@ pub fn run(connection: Connection) -> Result<()> {
             }
             Message::Notification(notification) => {
                 let (method, started) = (notification.method.clone(), Instant::now());
-                server.handle_notification(notification);
+                for outgoing in server.handle_notification(notification) {
+                    send(&connection, outgoing)?;
+                }
                 server.log(format_args!(
                     "notification {method} ({:?})",
                     started.elapsed()
@@ -148,9 +156,18 @@ fn send(connection: &Connection, message: Message) -> Result<()> {
         .context("sending a message to the client")
 }
 
+/// What we last told the client about one open document.
+struct Published {
+    uri: Uri,
+    diagnostics: Vec<Diagnostic>,
+}
+
 struct Server {
     workspace: Workspace,
     roots: Vec<PathBuf>,
+    config: Config,
+    /// Keyed by file key. Only documents with a non-empty list are present.
+    published: FxHashMap<String, Published>,
     can_register_watchers: bool,
     log_enabled: bool,
 }
@@ -175,11 +192,17 @@ impl Server {
             .and_then(|workspace| workspace.did_change_watched_files.as_ref())
             .and_then(|watched| watched.dynamic_registration)
             .unwrap_or(false);
+        let (config, problem) = Config::from_options(params.initialization_options.as_ref());
+        if let Some(problem) = problem {
+            eprintln!("[css-class-lsp] ignoring unreadable initializationOptions: {problem}");
+        }
         let mut workspace = Workspace::new();
         workspace.set_roots(roots.clone());
         Self {
             workspace,
             roots,
+            config,
+            published: FxHashMap::default(),
             can_register_watchers,
             log_enabled: std::env::var_os("CSS_CLASS_LSP_LOG").is_some(),
         }
@@ -193,11 +216,19 @@ impl Server {
 
     // ---- notifications -------------------------------------------------
 
-    fn handle_notification(&mut self, notification: Notification) {
+    /// Apply a notification, then return any diagnostics that changed as a result.
+    fn handle_notification(&mut self, notification: Notification) -> Vec<Message> {
         let method = notification.method.clone();
-        let outcome = catch_panic(|| self.apply_notification(notification));
-        if let Err(message) = outcome {
-            eprintln!("[css-class-lsp] panic while handling {method}: {message}");
+        let outcome = catch_panic(|| {
+            self.apply_notification(notification);
+            self.refresh_diagnostics()
+        });
+        match outcome {
+            Ok(messages) => messages,
+            Err(message) => {
+                eprintln!("[css-class-lsp] panic while handling {method}: {message}");
+                Vec::new()
+            }
         }
     }
 
@@ -388,6 +419,106 @@ impl Server {
             .map(|file| file.language)
     }
 
+    // ---- diagnostics -----------------------------------------------------
+
+    /// Recompute diagnostics for every open document and return a
+    /// `publishDiagnostics` message for each one whose list changed. Any
+    /// change (to the document, or to a stylesheet it depends on) can alter
+    /// the result, so all open documents are rechecked.
+    fn refresh_diagnostics(&mut self) -> Vec<Message> {
+        let mut current: Vec<(String, Uri, Vec<Diagnostic>)> = Vec::new();
+        for id in self.workspace.open_file_ids() {
+            let Some(file) = self.workspace.file(id) else {
+                continue;
+            };
+            if file.language != Language::Html {
+                continue;
+            }
+            current.push((
+                file_key(&file.uri),
+                file.uri.clone(),
+                self.diagnostics_for(id),
+            ));
+        }
+
+        let mut messages = Vec::new();
+        for (key, uri, diagnostics) in current {
+            let unchanged = match self.published.get(&key) {
+                Some(previous) => previous.diagnostics == diagnostics,
+                None => diagnostics.is_empty(),
+            };
+            if unchanged {
+                continue;
+            }
+            messages.push(publish_message(uri.clone(), diagnostics.clone()));
+            if diagnostics.is_empty() {
+                self.published.remove(&key);
+            } else {
+                self.published.insert(key, Published { uri, diagnostics });
+            }
+        }
+
+        // Documents that were closed: clear what we showed for them.
+        let closed: Vec<String> = self
+            .published
+            .keys()
+            .filter(|key| !self.workspace.is_open(key.as_str()))
+            .cloned()
+            .collect();
+        for key in closed {
+            if let Some(previous) = self.published.remove(&key) {
+                messages.push(publish_message(previous.uri, Vec::new()));
+            }
+        }
+        messages
+    }
+
+    fn diagnostics_for(&self, id: FileId) -> Vec<Diagnostic> {
+        let Some(file) = self.workspace.file(id) else {
+            return Vec::new();
+        };
+        let verdicts = self.workspace.usage_verdicts(id);
+        // Unknown CSS could define anything, so by default say nothing.
+        if verdicts.open_world && !self.config.report_in_open_world {
+            return Vec::new();
+        }
+        let mut diagnostics = Vec::new();
+        for item in &verdicts.items {
+            let Some((_, occurrence)) = self.workspace.resolve(item.occurrence) else {
+                continue;
+            };
+            let name = self.workspace.name(occurrence.name);
+            let (severity, code, message) = match item.verdict {
+                Verdict::Verified => continue,
+                Verdict::Undefined => (
+                    self.config.undefined_severity,
+                    "undefined-class",
+                    format!("class `{name}` is not defined in any stylesheet"),
+                ),
+                Verdict::Ambient => (
+                    self.config.ambient_severity,
+                    "unlinked-class",
+                    format!(
+                        "class `{name}` is defined in {} but not linked from this file",
+                        self.file_names(&item.defined_in, ", ", MAX_NAMED_FILES)
+                    ),
+                ),
+            };
+            let Some(severity) = lsp_severity(severity) else {
+                continue;
+            };
+            diagnostics.push(Diagnostic {
+                range: range_of(file, occurrence.name_span),
+                severity: Some(severity),
+                code: Some(NumberOrString::String(code.to_owned())),
+                source: Some(DIAGNOSTIC_SOURCE.to_owned()),
+                message,
+                ..Default::default()
+            });
+        }
+        diagnostics
+    }
+
     // ---- requests -------------------------------------------------------
 
     fn handle_request(&self, request: Request) -> Vec<Message> {
@@ -439,26 +570,51 @@ impl Server {
         self.workspace.occurrence_at(&key, offset)
     }
 
+    /// Every class name worth offering, linked ones first, each labelled with
+    /// where it comes from or that it is not linked.
     fn completion(&self, params: CompletionParams) -> Option<CompletionResponse> {
         let position = &params.text_document_position;
         let key = file_key(&position.text_document.uri);
-        let file = self.workspace.file_by_key(&key)?;
+        let origin = self.workspace.file_id(&key)?;
+        let file = self.workspace.file(origin)?;
         let offset = file.line_index.offset(&file.text, position.position);
         let context = file.language.class_context_at(&file.text, offset)?;
         let range = range_of(file, context.replace);
-        let items = self
-            .workspace
-            .class_names()
-            .into_iter()
-            .map(|(name, rule_count)| {
-                let name = self.workspace.name(name);
+
+        let mut candidates = self.workspace.completion_candidates(origin);
+        candidates.sort_by(|left, right| {
+            left.provided_by
+                .is_none()
+                .cmp(&right.provided_by.is_none())
+                .then_with(|| {
+                    self.workspace
+                        .name(left.name)
+                        .cmp(self.workspace.name(right.name))
+                })
+        });
+        let items = candidates
+            .iter()
+            .map(|candidate| {
+                let name = self.workspace.name(candidate.name);
+                let tier = if candidate.provided_by.is_some() {
+                    0
+                } else {
+                    1
+                };
+                let description = match candidate.provided_by.and_then(|id| self.workspace.file(id))
+                {
+                    Some(provider) => display_name(provider),
+                    None => "not linked".to_owned(),
+                };
                 CompletionItem {
                     label: name.to_owned(),
+                    label_details: Some(CompletionItemLabelDetails {
+                        detail: None,
+                        description: Some(description),
+                    }),
                     kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(format!(
-                        "{rule_count} rule{}",
-                        if rule_count == 1 { "" } else { "s" }
-                    )),
+                    detail: Some(rule_count_text(candidate.rule_count)),
+                    sort_text: Some(format!("{tier}-{name}")),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range,
                         new_text: name.to_owned(),
@@ -473,14 +629,20 @@ impl Server {
     fn hover(&self, params: HoverParams) -> Option<Hover> {
         let id = self.occurrence_under_cursor(&params.text_document_position_params)?;
         let (file, occurrence) = self.workspace.resolve(id)?;
+        let origin = id.file();
         let raw_name = file.text.get(occurrence.name_span.range())?;
         let definitions = self
             .workspace
-            .occurrences_named(Role::Definition, occurrence.name);
+            .definitions_visible_to(origin, occurrence.name);
+        let status = if occurrence.role == Role::Usage {
+            self.status_line(&self.workspace.classify(origin, occurrence.name))
+        } else {
+            None
+        };
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: self.hover_markdown(raw_name, &definitions),
+                value: self.hover_markdown(raw_name, &definitions, status.as_deref()),
             }),
             range: Some(range_of(file, occurrence.name_span)),
         })
@@ -489,10 +651,10 @@ impl Server {
     fn definition(&self, params: GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
         let id = self.occurrence_under_cursor(&params.text_document_position_params)?;
         let (_, occurrence) = self.workspace.resolve(id)?;
-        let locations = self.locations(
-            self.workspace
-                .occurrences_named(Role::Definition, occurrence.name),
-        );
+        let definitions = self
+            .workspace
+            .definitions_visible_to(id.file(), occurrence.name);
+        let locations = self.locations(definitions);
         (!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations))
     }
 
@@ -504,7 +666,7 @@ impl Server {
             found.extend(
                 self.locations(
                     self.workspace
-                        .occurrences_named(Role::Definition, occurrence.name),
+                        .definitions_visible_to(id.file(), occurrence.name),
                 ),
             );
         }
@@ -534,7 +696,50 @@ impl Server {
             .collect()
     }
 
-    fn hover_markdown(&self, raw_name: &str, definitions: &[OccurrenceId]) -> String {
+    /// One line saying how a used class is (or is not) connected to the file.
+    fn status_line(&self, classification: &Classification) -> Option<String> {
+        match classification.verdict {
+            Verdict::Verified if classification.chain.len() <= 1 => {
+                Some("defined in this file".to_owned())
+            }
+            Verdict::Verified => Some(format!(
+                "linked: {}",
+                self.file_names(&classification.chain, " → ", usize::MAX)
+            )),
+            Verdict::Ambient => {
+                let mut line = format!(
+                    "not linked from here: defined in {}",
+                    self.file_names(&classification.defined_in, ", ", MAX_NAMED_FILES)
+                );
+                if classification.open_world {
+                    line.push_str(" (this file may load CSS we cannot see)");
+                }
+                Some(line)
+            }
+            Verdict::Undefined => None,
+        }
+    }
+
+    /// File names in backticks, joined by `separator`, cut after `limit` names.
+    fn file_names(&self, files: &[FileId], separator: &str, limit: usize) -> String {
+        let mut parts: Vec<String> = files
+            .iter()
+            .take(limit)
+            .filter_map(|id| self.workspace.file(*id))
+            .map(|file| format!("`{}`", display_name(file)))
+            .collect();
+        if files.len() > limit {
+            parts.push("…".to_owned());
+        }
+        parts.join(separator)
+    }
+
+    fn hover_markdown(
+        &self,
+        raw_name: &str,
+        definitions: &[OccurrenceId],
+        status: Option<&str>,
+    ) -> String {
         let count = definitions.len();
         if count == 0 {
             return format!("**`.{raw_name}`** — no matching rule in the workspace CSS");
@@ -543,22 +748,19 @@ impl Server {
             "**`.{raw_name}`** — {count} rule{}",
             if count == 1 { "" } else { "s" }
         );
+        if let Some(status) = status {
+            markdown.push_str(&format!("\n\n{status}"));
+        }
         for id in definitions.iter().take(MAX_HOVER_RULES) {
             let Some((file, occurrence)) = self.workspace.resolve(*id) else {
                 continue;
             };
-            let file_name = uri_to_path(&file.uri)
-                .and_then(|path| {
-                    path.file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                })
-                .unwrap_or_else(|| file.uri.as_str().to_owned());
             let line = file
                 .line_index
                 .position(&file.text, occurrence.name_span.start as usize)
                 .line
                 + 1;
-            markdown.push_str(&format!("\n\n`{file_name}:{line}`"));
+            markdown.push_str(&format!("\n\n`{}:{line}`", display_name(file)));
             for context in self.workspace.context_names(file, occurrence) {
                 markdown.push_str(&format!(" · `{context}`"));
             }
@@ -578,6 +780,40 @@ impl Server {
         }
         markdown
     }
+}
+
+fn display_name(file: &FileEntry) -> String {
+    uri_to_path(&file.uri)
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| file.uri.as_str().to_owned())
+}
+
+fn rule_count_text(count: u32) -> String {
+    format!("{count} rule{}", if count == 1 { "" } else { "s" })
+}
+
+fn lsp_severity(severity: Severity) -> Option<DiagnosticSeverity> {
+    match severity {
+        Severity::Off => None,
+        Severity::Hint => Some(DiagnosticSeverity::HINT),
+        Severity::Information => Some(DiagnosticSeverity::INFORMATION),
+        Severity::Warning => Some(DiagnosticSeverity::WARNING),
+        Severity::Error => Some(DiagnosticSeverity::ERROR),
+    }
+}
+
+fn publish_message(uri: Uri, diagnostics: Vec<Diagnostic>) -> Message {
+    Message::Notification(Notification::new(
+        PublishDiagnostics::METHOD.to_owned(),
+        PublishDiagnosticsParams {
+            uri,
+            diagnostics,
+            version: None,
+        },
+    ))
 }
 
 fn range_of(file: &FileEntry, span: Span) -> Range {
@@ -611,5 +847,30 @@ mod tests {
         let second = catch_panic(|| 2 + 2);
         assert!(first.is_err());
         assert_eq!(second, Ok(4));
+    }
+
+    #[test]
+    fn severities_map_to_lsp_and_off_means_none() {
+        assert_eq!(lsp_severity(Severity::Off), None);
+        assert_eq!(lsp_severity(Severity::Hint), Some(DiagnosticSeverity::HINT));
+        assert_eq!(
+            lsp_severity(Severity::Information),
+            Some(DiagnosticSeverity::INFORMATION)
+        );
+        assert_eq!(
+            lsp_severity(Severity::Warning),
+            Some(DiagnosticSeverity::WARNING)
+        );
+        assert_eq!(
+            lsp_severity(Severity::Error),
+            Some(DiagnosticSeverity::ERROR)
+        );
+    }
+
+    #[test]
+    fn rule_counts_are_pluralised() {
+        assert_eq!(rule_count_text(1), "1 rule");
+        assert_eq!(rule_count_text(0), "0 rules");
+        assert_eq!(rule_count_text(4), "4 rules");
     }
 }
