@@ -18,11 +18,11 @@
 //! result up among indexed files. Nothing is cached, so creating or deleting a
 //! stylesheet needs no invalidation: the next question just finds a different answer.
 
-use super::{FileEntry, FileId, Workspace};
+use super::{FileEntry, FileId, OccurrenceId, Workspace};
 use crate::analysis::{Import, Role, Scope};
 use crate::strings::NameId;
 use crate::uri::{percent_decode, uri_to_path};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,48 @@ impl Reach {
         chain.reverse();
         chain
     }
+}
+
+/// The class names a file can see, and which file provides each.
+pub struct VisibleNames {
+    reach: Reach,
+    /// name -> (index of the nearest visit that defines it, number of visible rules)
+    names: FxHashMap<NameId, (usize, u32)>,
+}
+
+impl VisibleNames {
+    pub fn contains(&self, name: NameId) -> bool {
+        self.names.contains_key(&name)
+    }
+
+    pub fn open_world(&self) -> bool {
+        self.reach.open_world
+    }
+}
+
+/// One class name offered for completion in a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub name: NameId,
+    /// Verified: rules visible from the file. Ambient: rules anywhere in the workspace.
+    pub rule_count: u32,
+    /// The nearest file that makes the name visible; `None` for ambient names.
+    pub provided_by: Option<FileId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageVerdict {
+    pub occurrence: OccurrenceId,
+    pub verdict: Verdict,
+    /// Ambient: the stylesheets that define the name but are not reachable.
+    pub defined_in: Vec<FileId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageVerdicts {
+    /// One entry per class usage in the file, in source order.
+    pub items: Vec<UsageVerdict>,
+    pub open_world: bool,
 }
 
 impl Workspace {
@@ -160,6 +202,105 @@ impl Workspace {
             defined_in,
             open_world: reach.open_world,
         }
+    }
+
+    /// Every name `origin` can see, computed with one walk of the graph.
+    pub fn visible_names(&self, origin: FileId) -> VisibleNames {
+        let reach = self.reach(origin);
+        let mut names: FxHashMap<NameId, (usize, u32)> = FxHashMap::default();
+        for (visit_index, visit) in reach.visits.iter().enumerate() {
+            let Some(entry) = self.file(visit.file) else {
+                continue;
+            };
+            for occurrence in &entry.analysis.occurrences {
+                if occurrence.role != Role::Definition {
+                    continue;
+                }
+                // Private definitions are only visible from their own file.
+                if occurrence.scope == Scope::Private && visit.file != origin {
+                    continue;
+                }
+                let seen = names.entry(occurrence.name).or_insert((visit_index, 0));
+                seen.1 += 1;
+            }
+        }
+        VisibleNames { reach, names }
+    }
+
+    /// Every class name worth offering in `origin`: the visible ones (verified)
+    /// and the rest of the workspace's (ambient). Unordered.
+    pub fn completion_candidates(&self, origin: FileId) -> Vec<Candidate> {
+        let visible = self.visible_names(origin);
+        let mut candidates: Vec<Candidate> = visible
+            .names
+            .iter()
+            .map(|(name, (visit_index, rule_count))| Candidate {
+                name: *name,
+                rule_count: *rule_count,
+                provided_by: visible.reach.visits.get(*visit_index).map(|visit| visit.file),
+            })
+            .collect();
+        for (name, rule_count) in self.class_names() {
+            if !visible.contains(name) {
+                candidates.push(Candidate { name, rule_count, provided_by: None });
+            }
+        }
+        candidates
+    }
+
+    /// The verdict of every class usage in `origin`, from one walk of the graph.
+    pub fn usage_verdicts(&self, origin: FileId) -> UsageVerdicts {
+        let visible = self.visible_names(origin);
+        let mut items = Vec::new();
+        let mut defining: FxHashMap<NameId, Vec<FileId>> = FxHashMap::default();
+        if let Some(entry) = self.file(origin) {
+            for (index, occurrence) in entry.analysis.occurrences.iter().enumerate() {
+                if occurrence.role != Role::Usage {
+                    continue;
+                }
+                let id = OccurrenceId { file: origin, index: index as u32 };
+                if visible.contains(occurrence.name) {
+                    items.push(UsageVerdict { occurrence: id, verdict: Verdict::Verified, defined_in: Vec::new() });
+                    continue;
+                }
+                let defined_in = defining
+                    .entry(occurrence.name)
+                    .or_insert_with(|| self.defining_files(occurrence.name))
+                    .clone();
+                let verdict = if defined_in.is_empty() { Verdict::Undefined } else { Verdict::Ambient };
+                items.push(UsageVerdict { occurrence: id, verdict, defined_in });
+            }
+        }
+        UsageVerdicts { items, open_world: visible.open_world() }
+    }
+
+    /// Definitions of `name` that an editor should offer from `origin`: every
+    /// stylesheet's, plus the ones in `origin`'s own `<style>` blocks.
+    pub fn definitions_visible_to(&self, origin: FileId, name: NameId) -> Vec<OccurrenceId> {
+        let mut found = self.occurrences_named(Role::Definition, name);
+        if let Some(entry) = self.file(origin) {
+            for (index, occurrence) in entry.analysis.occurrences.iter().enumerate() {
+                let is_own_private_definition = occurrence.role == Role::Definition
+                    && occurrence.scope == Scope::Private
+                    && occurrence.name == name;
+                if is_own_private_definition {
+                    found.push(OccurrenceId { file: origin, index: index as u32 });
+                }
+            }
+        }
+        self.sort_by_location(&mut found);
+        found
+    }
+
+    /// Files with a shared definition of `name`, ordered by uri.
+    fn defining_files(&self, name: NameId) -> Vec<FileId> {
+        let mut files: Vec<FileId> = self
+            .occurrences_named(Role::Definition, name)
+            .iter()
+            .map(|id| id.file)
+            .collect();
+        files.dedup();
+        files
     }
 
     /// The indexed file an import points at, if it can be determined.
@@ -429,6 +570,92 @@ mod tests {
         let imports = workspace.file(origin).map_or(usize::MAX, |entry| entry.analysis.imports.len());
         assert_eq!(imports, 0);
         assert!(!classify_name(&workspace, "/w/index.html", "x").open_world);
+    }
+
+    #[test]
+    fn completion_candidates_split_verified_from_ambient() {
+        let mut workspace = Workspace::new();
+        add_css(&mut workspace, "/w/css/site.css", ".btn { }\n.btn:hover { }");
+        add_css(&mut workspace, "/w/css/other.css", ".card { }\n.btn { }");
+        add_html(&mut workspace, "/w/index.html", &page(&link("css/site.css"), r#"<p class="btn">"#));
+        let origin = workspace.file_id("/w/index.html").expect("page is indexed");
+
+        let mut found: Vec<(String, bool, u32)> = workspace
+            .completion_candidates(origin)
+            .iter()
+            .map(|candidate| {
+                (workspace.name(candidate.name).to_owned(), candidate.provided_by.is_some(), candidate.rule_count)
+            })
+            .collect();
+        found.sort();
+        assert_eq!(found, vec![("btn".to_owned(), true, 2), ("card".to_owned(), false, 1)]);
+    }
+
+    #[test]
+    fn completion_candidates_include_the_pages_own_private_names_only_for_that_page() {
+        let mut workspace = Workspace::new();
+        add_html(&mut workspace, "/w/a.html", &page("<style>.only { }</style>", ""));
+        add_html(&mut workspace, "/w/b.html", &page("", ""));
+        let names_for = |path: &str| -> Vec<String> {
+            let origin = workspace.file_id(path).expect("page is indexed");
+            workspace
+                .completion_candidates(origin)
+                .iter()
+                .map(|candidate| workspace.name(candidate.name).to_owned())
+                .collect()
+        };
+        assert_eq!(names_for("/w/a.html"), ["only"]);
+        assert!(names_for("/w/b.html").is_empty());
+    }
+
+    #[test]
+    fn usage_verdicts_agree_with_classify_for_every_usage() {
+        let mut workspace = Workspace::new();
+        add_css(&mut workspace, "/w/css/site.css", ".btn { }");
+        add_css(&mut workspace, "/w/css/other.css", ".card { }");
+        let body = r#"<p class="btn card ghost only">"#;
+        add_html(&mut workspace, "/w/index.html", &page(&format!("{}<style>.only {{ }}</style>", link("css/site.css")), body));
+        let origin = workspace.file_id("/w/index.html").expect("page is indexed");
+
+        let verdicts = workspace.usage_verdicts(origin);
+        assert_eq!(verdicts.items.len(), 4);
+        assert!(!verdicts.open_world);
+        for item in &verdicts.items {
+            let (_, occurrence) = workspace.resolve(item.occurrence).expect("usage resolves");
+            let single = workspace.classify(origin, occurrence.name);
+            assert_eq!(item.verdict, single.verdict, "name = {}", workspace.name(occurrence.name));
+            assert_eq!(item.defined_in, single.defined_in);
+        }
+        let by_name: Vec<(String, Verdict)> = verdicts
+            .items
+            .iter()
+            .filter_map(|item| workspace.resolve(item.occurrence))
+            .map(|(_, occurrence)| occurrence)
+            .zip(verdicts.items.iter())
+            .map(|(occurrence, item)| (workspace.name(occurrence.name).to_owned(), item.verdict))
+            .collect();
+        assert_eq!(
+            by_name,
+            vec![
+                ("btn".to_owned(), Verdict::Verified),
+                ("card".to_owned(), Verdict::Ambient),
+                ("ghost".to_owned(), Verdict::Undefined),
+                ("only".to_owned(), Verdict::Verified),
+            ]
+        );
+    }
+
+    #[test]
+    fn definitions_visible_to_adds_only_the_origins_private_ones() {
+        let mut workspace = Workspace::new();
+        add_css(&mut workspace, "/w/css/site.css", ".only { }");
+        add_html(&mut workspace, "/w/a.html", &page("<style>.only { }</style>", ""));
+        add_html(&mut workspace, "/w/b.html", &page("", ""));
+        let name = workspace.name_id("only").expect("interned");
+        let a = workspace.file_id("/w/a.html").expect("indexed");
+        let b = workspace.file_id("/w/b.html").expect("indexed");
+        assert_eq!(workspace.definitions_visible_to(a, name).len(), 2);
+        assert_eq!(workspace.definitions_visible_to(b, name).len(), 1);
     }
 
     #[test]

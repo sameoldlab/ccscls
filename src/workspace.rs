@@ -35,6 +35,13 @@ pub struct OccurrenceId {
     index: u32,
 }
 
+impl OccurrenceId {
+    /// The file this occurrence is in.
+    pub fn file(self) -> FileId {
+        self.file
+    }
+}
+
 /// Links in one name's list of occurrences.
 #[derive(Clone, Copy, Default)]
 struct Links {
@@ -170,6 +177,21 @@ impl Workspace {
         self.file(*self.ids.get(key)?)
     }
 
+    /// Handles of every file the client currently has open.
+    pub fn open_file_ids(&self) -> Vec<FileId> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.entry.as_ref().is_some_and(|entry| entry.open_version.is_some()))
+            .map(|(index, slot)| FileId { index: index as u32, generation: slot.generation })
+            .collect()
+    }
+
+    /// The id of an interned name, if it has been seen anywhere.
+    pub fn name_id(&self, text: &str) -> Option<NameId> {
+        self.strings.lookup(text)
+    }
+
     pub fn is_open(&self, key: &str) -> bool {
         self.file_by_key(key).is_some_and(|file| file.open_version.is_some())
     }
@@ -211,10 +233,7 @@ impl Workspace {
             }
             cursor = self.links_of(id).and_then(|links| links.next);
         }
-        found.sort_by_key(|id| {
-            self.resolve(*id)
-                .map(|(file, occurrence)| (file.uri.as_str(), occurrence.name_span.start))
-        });
+        self.sort_by_location(&mut found);
         found
     }
 
@@ -242,6 +261,14 @@ impl Workspace {
             .iter()
             .map(|id| self.strings.get(*id))
             .collect()
+    }
+
+    /// Order by (uri, position) so results are deterministic.
+    fn sort_by_location(&self, ids: &mut [OccurrenceId]) {
+        ids.sort_by_key(|id| {
+            self.resolve(*id)
+                .map(|(file, occurrence)| (file.uri.as_str(), occurrence.name_span.start))
+        });
     }
 
     fn allocate_slot(&mut self) -> u32 {
