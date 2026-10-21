@@ -431,7 +431,7 @@ impl Server {
             let Some(file) = self.workspace.file(id) else {
                 continue;
             };
-            if file.language != Language::Html {
+            if !file.language.is_markup() {
                 continue;
             }
             current.push((

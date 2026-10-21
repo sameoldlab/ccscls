@@ -1,5 +1,8 @@
 //! Stage 5: workspace symbols and configuration that are not built yet.
 //! Run with `cargo test --test stage5_polish -- --ignored`.
+//!
+//! Diagnostics and their severity settings are implemented and tested in
+//! `stage_b_visibility.rs`.
 
 mod common;
 use common::*;

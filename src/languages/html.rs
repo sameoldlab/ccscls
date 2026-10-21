@@ -88,7 +88,7 @@ fn is_opaque(value: &str) -> bool {
 }
 
 /// Whitespace-separated tokens with their byte offsets within `text`.
-fn tokens(text: &str) -> impl Iterator<Item = (usize, &str)> {
+pub(super) fn tokens(text: &str) -> impl Iterator<Item = (usize, &str)> {
     let mut position = 0;
     std::iter::from_fn(move || {
         let rest = text.get(position..)?;
@@ -276,7 +276,7 @@ fn scan_document(src: &str) -> Scan {
     found
 }
 
-fn find_bytes(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+pub(super) fn find_bytes(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     haystack
         .get(from..)?
         .windows(needle.len())
@@ -284,7 +284,7 @@ fn find_bytes(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
         .map(|found| from + found)
 }
 
-fn find_bytes_ignore_case(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+pub(super) fn find_bytes_ignore_case(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     haystack
         .get(from..)?
         .windows(needle.len())

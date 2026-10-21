@@ -52,47 +52,6 @@ fn hover_text(hover: Option<Hover>) -> String {
     }
 }
 
-/// The most recent diagnostics published for `uri`; empty if none were ever published.
-fn latest_diagnostics(client: &mut TestClient, uri: &Uri) -> Vec<Diagnostic> {
-    client.barrier();
-    let mut latest = Vec::new();
-    for notification in &client.notifications {
-        if notification.method != "textDocument/publishDiagnostics" {
-            continue;
-        }
-        let Ok(params) =
-            serde_json::from_value::<PublishDiagnosticsParams>(notification.params.clone())
-        else {
-            continue;
-        };
-        if &params.uri == uri {
-            latest = params.diagnostics;
-        }
-    }
-    latest
-}
-
-/// (class name, severity) for each diagnostic, sorted by name.
-fn summary(diagnostics: &[Diagnostic]) -> Vec<(String, DiagnosticSeverity)> {
-    let mut found: Vec<(String, DiagnosticSeverity)> = diagnostics
-        .iter()
-        .map(|diagnostic| {
-            let name = diagnostic
-                .message
-                .split('`')
-                .nth(1)
-                .unwrap_or("")
-                .to_owned();
-            (
-                name,
-                diagnostic.severity.unwrap_or(DiagnosticSeverity::ERROR),
-            )
-        })
-        .collect();
-    found.sort_by(|left, right| left.0.cmp(&right.0));
-    found
-}
-
 fn expected(entries: &[(&str, DiagnosticSeverity)]) -> Vec<(String, DiagnosticSeverity)> {
     entries
         .iter()
@@ -317,7 +276,7 @@ fn undefined_classes_warn_and_unlinked_ones_hint_by_default() {
     let diagnostics = latest_diagnostics(&mut client, &index);
 
     assert_eq!(
-        summary(&diagnostics),
+        diagnostic_summary(&diagnostics),
         expected(&[
             ("card", DiagnosticSeverity::HINT),
             ("card-title", DiagnosticSeverity::HINT),
@@ -388,7 +347,7 @@ fn severities_come_from_initialization_options() {
         let (workspace, mut client) = site_with(Some(options.clone()));
         let index = workspace.uri("index.html");
         client.open(&index, "html", &workspace.read("index.html"));
-        let got = summary(&latest_diagnostics(&mut client, &index));
+        let got = diagnostic_summary(&latest_diagnostics(&mut client, &index));
         assert_eq!(got, expected(&wanted), "options = {options}");
         client.shutdown();
     }
@@ -416,7 +375,7 @@ fn files_with_unknown_css_sources_stay_quiet_unless_asked() {
     let page = uri("file:///virtual/fragment.html");
     client.open(&page, "html", fragment);
     assert_eq!(
-        summary(&latest_diagnostics(&mut client, &page)),
+        diagnostic_summary(&latest_diagnostics(&mut client, &page)),
         expected(&[
             ("card", DiagnosticSeverity::HINT),
             ("nothing-defines-this", DiagnosticSeverity::WARNING),
@@ -431,7 +390,7 @@ fn editing_a_stylesheet_refreshes_the_diagnostics_of_pages_that_use_it() {
     let index = workspace.uri("index.html");
     let styles = workspace.uri("css/styles.css");
     client.open(&index, "html", &workspace.read("index.html"));
-    let before = summary(&latest_diagnostics(&mut client, &index));
+    let before = diagnostic_summary(&latest_diagnostics(&mut client, &index));
     assert!(
         before.iter().any(|(name, _)| name == "missing-class"),
         "{before:?}"
@@ -440,7 +399,7 @@ fn editing_a_stylesheet_refreshes_the_diagnostics_of_pages_that_use_it() {
     // Define the missing class in a stylesheet the page links.
     let original = workspace.read("css/styles.css");
     client.open(&styles, "css", &format!("{original}.missing-class {{ }}\n"));
-    let after = summary(&latest_diagnostics(&mut client, &index));
+    let after = diagnostic_summary(&latest_diagnostics(&mut client, &index));
     assert!(
         after.iter().all(|(name, _)| name != "missing-class"),
         "{after:?}"
@@ -453,7 +412,7 @@ fn editing_a_stylesheet_refreshes_the_diagnostics_of_pages_that_use_it() {
 
     // Take it away again.
     client.change(&styles, 2, &original);
-    let restored = summary(&latest_diagnostics(&mut client, &index));
+    let restored = diagnostic_summary(&latest_diagnostics(&mut client, &index));
     assert!(
         restored.iter().any(|(name, _)| name == "missing-class"),
         "{restored:?}"
@@ -478,7 +437,7 @@ fn import_chains_make_classes_verified_for_diagnostics() {
     let index = workspace.uri("index.html");
     client.open(&index, "html", &workspace.read("index.html"));
     assert_eq!(
-        summary(&latest_diagnostics(&mut client, &index)),
+        diagnostic_summary(&latest_diagnostics(&mut client, &index)),
         expected(&[("ghost", DiagnosticSeverity::WARNING)])
     );
     client.shutdown();
@@ -497,7 +456,7 @@ fn a_style_block_class_is_undefined_on_every_other_page() {
     );
     assert!(latest_diagnostics(&mut client, &owner).is_empty());
     assert_eq!(
-        summary(&latest_diagnostics(&mut client, &other)),
+        diagnostic_summary(&latest_diagnostics(&mut client, &other)),
         expected(&[("only", DiagnosticSeverity::WARNING)])
     );
     client.shutdown();

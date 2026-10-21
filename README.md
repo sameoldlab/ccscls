@@ -77,6 +77,7 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
       mod.rs            detect, analyze, completion context, render name, watch globs
       css.rs            selectors -> definitions (tree-sitter-css), CSS escaping
       html.rs           class attributes -> usages (lexical scanner), cursor context
+      svelte.rs         class attributes, class: directives and class={...} expressions, <style> blocks
     src/analysis.rs   language-neutral results: Occurrence, Role, Scope, Import, Span, FileAnalysis
     src/config.rs     settings from initializationOptions (diagnostic severities)
     src/workspace.rs  files, generational handles, per-name occurrence lists

@@ -18,7 +18,9 @@ Verification state, stated plainly:
   One compile error found along the way (`Observed` needed `PartialEq`) was fixed by inspection.
 - The toolchain is no longer used to verify in this environment; if something fails, send the output.
 - Stage B1 (the graph core and verdicts) was compiled and tested on your machine and works.
-- Stage B2 (below) was written after that and has **never been compiled**. Expect the first
+- Stage B2 was compiled and works on your machine ("builds successfully").
+- The Svelte handler (stage C1, below) was written after that and has **never been compiled**.
+- Stage B2 note, kept for reference: it was written after B1 and has been built, not necessarily fully tested. Expect the first
   `cargo test` to find typos; the pure parts have unit tests to localise them, and the LSP behaviour
   has its own file of tests (`stage_b_visibility.rs`).
 - One existing assertion changed on purpose: the exact hover text for a class used in a page now
@@ -185,6 +187,28 @@ Original plan for the whole stage:
   changes existing verdicts, and adding an edge only promotes ambient to verified.
 
 ### Stage C: frameworks and JS import edges
+
+**C1 (Svelte): written, not yet compiled.** `languages/svelte.rs`, behind the `Language::Svelte` variant:
+
+- Scanner that skips balanced `{...}` (text, between attributes, inside values), strings, template
+  literals and comments, so `>` and quotes inside expressions do not break tag scanning.
+- Class names are found in: static `class="..."` text; string literals, template text and bare object
+  keys inside `class={...}` and mixed values; and `class:name` directives (shorthand and `={expr}`).
+- Completion context inside all of those, including the directive name and a literal inside an
+  expression; nothing outside class positions.
+- `<style>` blocks (plain CSS only; `lang="scss"` etc. are skipped) become private definitions.
+- Every component is open-world, so diagnostics stay quiet unless `reportInOpenWorld` is set.
+- Tests: `svelte_fixtures.rs` (annotated fixtures), `svelte_context.rs` (cursor positions),
+  `stage_c_svelte.rs` (LSP level), and unit tests in `svelte.rs`.
+- Known limits: a string literal inside a class expression is assumed to be a class name; `:global(...)`
+  rules in a component's `<style>` are still treated as private rather than global; object-key detection
+  is lexical (an unusual destructuring pattern could be misread); rename needs more than `render_name`
+  for the `class:name` shorthand (it must expand to `class:new={name}`), which stage D must handle;
+  JS imports in `<script>` are not followed yet.
+
+JSX and Vue are deferred.
+
+Original plan for the whole stage:
 
 - JSX/TSX handler (`className`, `class`, helper calls such as `clsx`/`cn`, template-literal static parts,
   object keys), Svelte (brace-aware tag scanning, `class:name` directive incl. shorthand, `class={...}`

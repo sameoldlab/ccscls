@@ -513,7 +513,7 @@ fn watcher_registration_follows_client_capability() {
         .iter()
         .map(|w| w["globPattern"].as_str().unwrap())
         .collect();
-    assert_eq!(globs, ["**/*.css", "**/*.html", "**/*.htm"]);
+    assert_eq!(globs, ["**/*.css", "**/*.html", "**/*.htm", "**/*.svelte"]);
     c.shutdown();
 
     // default: no dynamic registration

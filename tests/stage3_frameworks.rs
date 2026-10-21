@@ -1,4 +1,5 @@
-//! Stage 3: class usages in JSX/TSX, Svelte and Vue. NOT IMPLEMENTED YET.
+//! Stage 3: class usages in JSX/TSX and Vue. NOT IMPLEMENTED YET.
+//! (Svelte is implemented and tested in `stage_c_svelte.rs`.)
 //! Run with `cargo test --test stage3_frameworks -- --ignored`.
 //!
 //! The CSS side is the `site` fixture; each test opens one virtual component
@@ -157,52 +158,6 @@ fn jsx_usages_show_up_in_references_from_css() {
     c.shutdown();
 }
 
-const SVELTE: &str = r#"<script>
-  let active = false;
-</script>
-
-<div class="btn {active ? 'card' : ''} page">x</div>
-<button class:active>shorthand</button>
-<button class:title={active}>explicit</button>
-<button class={['home', active && 'btn-large']}>svelte 5 array</button>
-"#;
-
-#[test]
-#[ignore = "stage 3: svelte"]
-fn svelte_class_attribute_mixed_content_and_directives_resolve() {
-    let (ws, mut c) = site();
-    let u = uri("file:///virtual/Comp.svelte");
-    c.open(&u, "svelte", SVELTE);
-    assert_resolves(&mut c, &ws, &u, SVELTE, "btn {active", "btn");
-    assert_resolves(&mut c, &ws, &u, SVELTE, "card' :", "card");
-    assert_resolves(&mut c, &ws, &u, SVELTE, "page\">", "page");
-    // directive name is the class (cursor after `class:`)
-    assert_resolves(&mut c, &ws, &u, SVELTE, "class:active>", "active");
-    assert_resolves(&mut c, &ws, &u, SVELTE, "title={active}", "title");
-    assert_resolves(&mut c, &ws, &u, SVELTE, "'home'", "home");
-    assert_resolves(&mut c, &ws, &u, SVELTE, "'btn-large'", "btn-large");
-    // The JS variable in `{active ? ...}` and the <script> are not classes.
-    assert!(
-        c.definition(&u, position_of(SVELTE, "let active", 6))
-            .is_none()
-    );
-    c.shutdown();
-}
-
-#[test]
-#[ignore = "stage 3: svelte"]
-fn svelte_class_directive_completion() {
-    let (_ws, mut c) = site();
-    let l = complete_labels(
-        &mut c,
-        &uri("file:///virtual/D.svelte"),
-        "<div class:ca$0={x}>",
-        "svelte",
-    );
-    assert!(l.contains(&"card".to_owned()), "{l:?}");
-    c.shutdown();
-}
-
 const VUE: &str = r#"<template>
   <div class="btn" :class="{ active: isOn, 'btn-large': big }">
     <p :class="['card', isOn && 'title']">x</p>
@@ -230,30 +185,6 @@ fn vue_static_and_bound_class_attributes_resolve() {
     // `isOn` / `big` / `page` (an identifier here) are JS expressions, not class names.
     assert!(c.definition(&u, position_of(VUE, "isOn,", 1)).is_none());
     assert!(c.definition(&u, position_of(VUE, "=\"page\"", 3)).is_none());
-    c.shutdown();
-}
-
-#[test]
-#[ignore = "stage 3: svelte scoped style"]
-fn svelte_style_blocks_are_component_scoped() {
-    let (_ws, mut c) = site();
-    let own = complete_labels(
-        &mut c,
-        &uri("file:///virtual/A.svelte"),
-        "<style>\n.mine { }\n</style>\n<p class=\"$0\">",
-        "svelte",
-    );
-    assert!(own.contains(&"mine".to_owned()), "{own:?}");
-    let other = complete_labels(
-        &mut c,
-        &uri("file:///virtual/B.svelte"),
-        "<p class=\"$0\">",
-        "svelte",
-    );
-    assert!(
-        !other.contains(&"mine".to_owned()),
-        "scoped class leaked into B: {other:?}"
-    );
     c.shutdown();
 }
 

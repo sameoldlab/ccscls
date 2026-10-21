@@ -8,6 +8,7 @@
 
 pub mod css;
 pub mod html;
+pub mod svelte;
 
 use crate::analysis::{FileAnalysis, Import, Role, Span};
 use crate::strings::Strings;
@@ -17,9 +18,10 @@ use std::path::Path;
 pub enum Language {
     Css,
     Html,
+    Svelte,
 }
 
-pub const ALL: [Language; 2] = [Language::Css, Language::Html];
+pub const ALL: [Language; 3] = [Language::Css, Language::Html, Language::Svelte];
 
 /// The class-name token under the cursor, for completion.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +104,7 @@ impl Language {
                 Vec::new()
             }
             Self::Html => html::analyze(text, strings, out),
+            Self::Svelte => svelte::analyze(text, strings, out),
         };
         for region in regions {
             region
@@ -128,7 +131,7 @@ impl Language {
         match self {
             Self::Css => css::analyze(&mut engines.css, region_text, strings, &mut inner),
             // Markup nested inside another file is not supported.
-            Self::Html => return,
+            Self::Html | Self::Svelte => return,
         }
         for occurrence in &inner.occurrences {
             let name_span = occurrence.name_span.shifted(span.start);
@@ -164,14 +167,20 @@ impl Language {
         match self {
             Self::Css => None,
             Self::Html => html::class_context_at(text, offset),
+            Self::Svelte => svelte::class_context_at(text, offset),
         }
+    }
+
+    /// Whether files of this language use class names (as opposed to defining them).
+    pub fn is_markup(self) -> bool {
+        matches!(self, Self::Html | Self::Svelte)
     }
 
     /// How `new_name` must be written in this language to replace `original_token`.
     pub fn render_name(self, original_token: &str, new_name: &str) -> String {
         match self {
             Self::Css => css::render_name(original_token, new_name),
-            Self::Html => new_name.to_owned(),
+            Self::Html | Self::Svelte => new_name.to_owned(),
         }
     }
 
@@ -179,6 +188,7 @@ impl Language {
         match self {
             Self::Css => &["css"],
             Self::Html => &["html"],
+            Self::Svelte => &["svelte"],
         }
     }
 
@@ -186,6 +196,7 @@ impl Language {
         match self {
             Self::Css => &["css"],
             Self::Html => &["html", "htm"],
+            Self::Svelte => &["svelte"],
         }
     }
 }
@@ -215,13 +226,59 @@ mod tests {
         );
         assert_eq!(Language::detect(Some("javascript"), path("a.js")), None);
         assert_eq!(Language::detect(None, None), None);
+        assert_eq!(
+            Language::detect(Some("svelte"), None),
+            Some(Language::Svelte)
+        );
+        assert_eq!(
+            Language::detect(None, path("src/App.svelte")),
+            Some(Language::Svelte)
+        );
+    }
+
+    #[test]
+    fn only_markup_languages_use_class_names() {
+        assert!(Language::Html.is_markup());
+        assert!(Language::Svelte.is_markup());
+        assert!(!Language::Css.is_markup());
+    }
+
+    #[test]
+    fn svelte_style_blocks_become_private_definitions() {
+        let source = "<div class=\"x\"></div>\n<style>\n  .only { }\n</style>\n";
+        let mut engines = Engines::new();
+        let mut strings = Strings::new();
+        let mut out = FileAnalysis::default();
+        Language::Svelte.analyze(&mut engines, source, &mut strings, &mut out);
+        let found: Vec<(Role, crate::analysis::Scope, &str)> = out
+            .occurrences
+            .iter()
+            .map(|occurrence| {
+                (
+                    occurrence.role,
+                    occurrence.scope,
+                    strings.get(occurrence.name),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (Role::Usage, crate::analysis::Scope::Shared, "x"),
+                (Role::Definition, crate::analysis::Scope::Private, "only"),
+            ]
+        );
+        assert!(
+            out.open_world,
+            "a component's CSS also comes from outside it"
+        );
     }
 
     #[test]
     fn watch_globs_cover_every_extension() {
         assert_eq!(
             Language::watch_globs(),
-            ["**/*.css", "**/*.html", "**/*.htm"]
+            ["**/*.css", "**/*.html", "**/*.htm", "**/*.svelte"]
         );
     }
 

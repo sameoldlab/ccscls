@@ -706,3 +706,48 @@ pub fn rename_params(uri: &Uri, pos: Position, new_name: &str) -> lsp_types::Ren
         work_done_progress_params: Default::default(),
     }
 }
+
+/// The most recent diagnostics published for `uri`; empty if none were ever published.
+pub fn latest_diagnostics(client: &mut TestClient, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
+    client.barrier();
+    let mut latest = Vec::new();
+    for notification in &client.notifications {
+        if notification.method != "textDocument/publishDiagnostics" {
+            continue;
+        }
+        let Ok(params) = serde_json::from_value::<lsp_types::PublishDiagnosticsParams>(
+            notification.params.clone(),
+        ) else {
+            continue;
+        };
+        if &params.uri == uri {
+            latest = params.diagnostics;
+        }
+    }
+    latest
+}
+
+/// (class name, severity) for each diagnostic, sorted by name.
+pub fn diagnostic_summary(
+    diagnostics: &[lsp_types::Diagnostic],
+) -> Vec<(String, lsp_types::DiagnosticSeverity)> {
+    let mut found: Vec<(String, lsp_types::DiagnosticSeverity)> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let name = diagnostic
+                .message
+                .split('`')
+                .nth(1)
+                .unwrap_or("")
+                .to_owned();
+            (
+                name,
+                diagnostic
+                    .severity
+                    .unwrap_or(lsp_types::DiagnosticSeverity::ERROR),
+            )
+        })
+        .collect();
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+    found
+}
