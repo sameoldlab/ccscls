@@ -294,7 +294,7 @@ fn undefined_classes_warn_and_unlinked_ones_hint_by_default() {
         .map(|(_, range)| range)
         .expect("annotated in the fixture");
     assert_eq!(missing.range, missing_range);
-    assert_eq!(missing.source.as_deref(), Some("css-class-lsp"));
+    assert_eq!(missing.source.as_deref(), Some("csscls"));
     assert_eq!(
         missing.code,
         Some(NumberOrString::String("undefined-class".to_owned()))

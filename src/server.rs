@@ -54,7 +54,7 @@ const MAX_FILE_BYTES: u64 = 2_000_000;
 const MAX_HOVER_RULES: usize = 5;
 const MAX_HOVER_RULE_CHARS: usize = 2_000;
 const MAX_NAMED_FILES: usize = 3;
-const DIAGNOSTIC_SOURCE: &str = "css-class-lsp";
+const DIAGNOSTIC_SOURCE: &str = "csscls";
 
 pub fn capabilities() -> ServerCapabilities {
     ServerCapabilities {
@@ -97,7 +97,7 @@ pub fn run(connection: Connection) -> Result<()> {
     let result = InitializeResult {
         capabilities: capabilities(),
         server_info: Some(ServerInfo {
-            name: "css-class-lsp".into(),
+            name: "csscls".into(),
             version: Some(env!("CARGO_PKG_VERSION").into()),
         }),
     };
@@ -109,7 +109,7 @@ pub fn run(connection: Connection) -> Result<()> {
     let mut server = Server::new(&params);
     if let Some(error) = server.workspace.load_error() {
         eprintln!(
-            "[css-class-lsp] a grammar failed to load, so its files are not indexed: {error}"
+            "[csscls] a grammar failed to load, so its files are not indexed: {error}"
         );
     }
     // `initialize_finish` has already consumed the client's `initialized`
@@ -194,7 +194,7 @@ impl Server {
             .unwrap_or(false);
         let (config, problem) = Config::from_options(params.initialization_options.as_ref());
         if let Some(problem) = problem {
-            eprintln!("[css-class-lsp] ignoring unreadable initializationOptions: {problem}");
+            eprintln!("[csscls] ignoring unreadable initializationOptions: {problem}");
         }
         let mut workspace = Workspace::new();
         workspace.set_roots(roots.clone());
@@ -210,7 +210,7 @@ impl Server {
 
     fn log(&self, args: std::fmt::Arguments<'_>) {
         if self.log_enabled {
-            eprintln!("[css-class-lsp] {args}");
+            eprintln!("[csscls] {args}");
         }
     }
 
@@ -226,7 +226,7 @@ impl Server {
         match outcome {
             Ok(messages) => messages,
             Err(message) => {
-                eprintln!("[css-class-lsp] panic while handling {method}: {message}");
+                eprintln!("[csscls] panic while handling {method}: {message}");
                 Vec::new()
             }
         }
@@ -293,7 +293,7 @@ impl Server {
         };
         let params = RegistrationParams {
             registrations: vec![Registration {
-                id: "css-class-lsp-watch".into(),
+                id: "csscls-watch".into(),
                 method: DidChangeWatchedFiles::METHOD.into(),
                 register_options: Some(
                     serde_json::to_value(options).context("encoding the watcher registration")?,
@@ -301,7 +301,7 @@ impl Server {
             }],
         };
         Ok(vec![Message::Request(Request::new(
-            RequestId::from("css-class-lsp/register-watchers".to_string()),
+            RequestId::from("csscls/register-watchers".to_string()),
             "client/registerCapability".into(),
             params,
         ))])
@@ -552,7 +552,7 @@ impl Server {
             Ok(params) => match catch_panic(|| handler(self, params)) {
                 Ok(result) => Response::new_ok(id, result),
                 Err(message) => {
-                    eprintln!("[css-class-lsp] panic while handling a request: {message}");
+                    eprintln!("[csscls] panic while handling a request: {message}");
                     let code = ErrorCode::InternalError as i32;
                     Response::new_err(id, code, format!("internal error: {message}"))
                 }

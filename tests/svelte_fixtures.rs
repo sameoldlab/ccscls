@@ -2,7 +2,7 @@
 
 mod common;
 use common::*;
-use css_class_lsp::languages::Language;
+use csscls::languages::Language;
 
 #[test]
 fn every_svelte_fixture_matches_its_annotations() {

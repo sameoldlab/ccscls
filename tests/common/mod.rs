@@ -2,9 +2,9 @@
 //! LSP client. Included by each integration test via `mod common;`.
 #![allow(dead_code)]
 
-use css_class_lsp::analysis::{FileAnalysis, Role, Span};
-use css_class_lsp::languages::{Engines, Language};
-use css_class_lsp::strings::Strings;
+use csscls::analysis::{FileAnalysis, Role, Span};
+use csscls::languages::{Engines, Language};
+use csscls::strings::Strings;
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response, ResponseError};
 use lsp_types::{
     ClientCapabilities, DidChangeWatchedFilesClientCapabilities, InitializeParams,
@@ -241,7 +241,7 @@ impl TempWorkspace {
         self.dir.path().join(rel)
     }
     pub fn uri(&self, rel: &str) -> Uri {
-        css_class_lsp::uri::path_to_uri(&self.file(rel)).unwrap()
+        csscls::uri::path_to_uri(&self.file(rel)).unwrap()
     }
     pub fn read(&self, rel: &str) -> String {
         std::fs::read_to_string(self.file(rel)).unwrap()
@@ -274,7 +274,7 @@ impl TempWorkspace {
         let mut out = Vec::new();
         for path in walk_files(self.path(), ext) {
             let src = std::fs::read_to_string(&path).unwrap();
-            let uri = css_class_lsp::uri::path_to_uri(&path).unwrap();
+            let uri = csscls::uri::path_to_uri(&path).unwrap();
             for (e, range) in expected_ranges_in(&src, syntax) {
                 if e.name == name {
                     out.push(Location {
@@ -345,7 +345,7 @@ fn walk_files(dir: &Path, ext: &str) -> Vec<PathBuf> {
 
 /// Apply LSP text edits (UTF-16 positions, all relative to the original text).
 pub fn apply_edits(text: &str, edits: &[lsp_types::TextEdit]) -> String {
-    let li = css_class_lsp::line_index::LineIndex::new(text);
+    let li = csscls::line_index::LineIndex::new(text);
     let mut spans: Vec<(usize, usize, &str)> = edits
         .iter()
         .map(|e| {
@@ -378,7 +378,7 @@ pub struct ClientOptions {
     pub init_options: Option<serde_json::Value>,
 }
 
-type ServerResult = css_class_lsp::error::Result<()>;
+type ServerResult = csscls::error::Result<()>;
 
 pub struct TestClient {
     conn: Connection,
@@ -395,7 +395,7 @@ pub struct TestClient {
 impl TestClient {
     pub fn start(opts: ClientOptions) -> Self {
         let (server_conn, client_conn) = Connection::memory();
-        let server = std::thread::spawn(move || css_class_lsp::server::run(server_conn));
+        let server = std::thread::spawn(move || csscls::server::run(server_conn));
 
         let mut client = Self {
             conn: client_conn,
@@ -409,7 +409,7 @@ impl TestClient {
 
         let folders = opts.workspace.as_ref().map(|p| {
             vec![WorkspaceFolder {
-                uri: css_class_lsp::uri::path_to_uri(p).unwrap(),
+                uri: csscls::uri::path_to_uri(p).unwrap(),
                 name: "test".into(),
             }]
         });

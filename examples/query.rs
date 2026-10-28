@@ -22,7 +22,7 @@ fn main() {
     }
     let root = std::fs::canonicalize(&args[0]).expect("workspace dir");
     let (server_conn, conn) = Connection::memory();
-    let server = std::thread::spawn(move || css_class_lsp::server::run(server_conn));
+    let server = std::thread::spawn(move || csscls::server::run(server_conn));
     let mut next_id = 0;
     let mut call = |method: &str, params: Value| -> Value {
         next_id += 1;
@@ -54,7 +54,7 @@ fn main() {
             .unwrap();
     };
 
-    let root_uri = css_class_lsp::uri::path_to_uri(&root).unwrap();
+    let root_uri = csscls::uri::path_to_uri(&root).unwrap();
     call(
         "initialize",
         json!({ "capabilities": {}, "workspaceFolders": [{ "uri": root_uri.as_str(), "name": "q" }] }),
@@ -98,7 +98,7 @@ fn main() {
             .take(col - 1)
             .map(char::len_utf16)
             .sum();
-        let uri = css_class_lsp::uri::path_to_uri(&path).unwrap();
+        let uri = csscls::uri::path_to_uri(&path).unwrap();
         let lang = if path.extension().is_some_and(|e| e == "css") {
             "css"
         } else {
@@ -155,7 +155,7 @@ fn print_locations(root: &Path, r: Value) {
         println!("(none)");
     }
     for l in locs {
-        let path: PathBuf = css_class_lsp::uri::uri_to_path(&l.uri).unwrap();
+        let path: PathBuf = csscls::uri::uri_to_path(&l.uri).unwrap();
         let shown = path
             .strip_prefix(root)
             .unwrap_or(&path)

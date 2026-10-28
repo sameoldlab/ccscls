@@ -31,7 +31,7 @@ fn recv(r: &mut impl BufRead) -> Value {
 
 #[test]
 fn binary_speaks_lsp_over_stdio_and_exits_cleanly() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_css-class-lsp"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_csscls"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -58,7 +58,7 @@ fn binary_speaks_lsp_over_stdio_and_exits_cleanly() {
     let init = recv(&mut stdout);
     assert_eq!(init["id"], 1);
     assert_eq!(init["result"]["capabilities"]["hoverProvider"], true);
-    assert_eq!(init["result"]["serverInfo"]["name"], "css-class-lsp");
+    assert_eq!(init["result"]["serverInfo"]["name"], "csscls");
 
     send(
         &mut stdin,

@@ -2,8 +2,8 @@
 //! every keystroke, so every prefix/suffix of every fixture must index without
 //! panicking and with sane spans. (Deliberately NOT adversarial: no fuzzing.)
 
-use css_class_lsp::languages::Language;
-use css_class_lsp::languages::css::unescape_ident;
+use csscls::languages::Language;
+use csscls::languages::css::unescape_ident;
 
 mod common;
 use common::{Observed, Observer};

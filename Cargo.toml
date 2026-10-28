@@ -1,5 +1,6 @@
 [package]
-name = "css-class-lsp"
+name = "csscls"
+description="language server for css classes"
 version = "0.1.0"
 edition = "2024"
 

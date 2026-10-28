@@ -3,8 +3,8 @@
 
 mod common;
 use common::{Observer, parse_cursor};
-use css_class_lsp::languages::Language;
-use css_class_lsp::line_index::LineIndex;
+use csscls::languages::Language;
+use csscls::line_index::LineIndex;
 
 /// (text before the cursor's token, whole token) at `$0`, or None if the cursor
 /// is not in a class value.

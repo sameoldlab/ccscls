@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use css_class_lsp::languages::Language;
+use csscls::languages::Language;
 use lsp_types::*;
 
 const TODO: &str = "stage 2: rename";
@@ -129,7 +129,7 @@ fn renaming_a_repeated_class_touches_every_occurrence_and_nothing_else() {
     let mut total = 0;
     for (uri, edits) in edits_by_uri(&edit) {
         total += edits.len();
-        let path = css_class_lsp::uri::uri_to_path(&uri.parse::<Uri>().unwrap()).unwrap();
+        let path = csscls::uri::uri_to_path(&uri.parse::<Uri>().unwrap()).unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
         let after = apply_edits(&before, &edits);
         if uri.ends_with(".css") {

@@ -13,10 +13,10 @@
 
 mod common;
 use common::fixtures_dir;
-use css_class_lsp::analysis::Role;
-use css_class_lsp::languages::Language;
-use css_class_lsp::uri::{file_key, path_to_uri};
-use css_class_lsp::workspace::Workspace;
+use csscls::analysis::Role;
+use csscls::languages::Language;
+use csscls::uri::{file_key, path_to_uri};
+use csscls::workspace::Workspace;
 use std::path::{Path, PathBuf};
 
 fn files_under(dir: &Path, found: &mut Vec<PathBuf>) {

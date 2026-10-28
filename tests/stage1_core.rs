@@ -60,7 +60,7 @@ fn initialize_advertises_capabilities() {
         }
         other => panic!("unexpected sync capability {other:?}"),
     }
-    assert_eq!(c.init.server_info.as_ref().unwrap().name, "css-class-lsp");
+    assert_eq!(c.init.server_info.as_ref().unwrap().name, "csscls");
     c.shutdown();
 }
 
