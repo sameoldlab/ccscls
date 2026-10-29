@@ -312,7 +312,9 @@ fn read_value(bytes: &[u8], start: usize, quote: Option<u8>) -> (usize, Vec<Chun
         }
         cursor += 1;
     }
-    if cursor > static_start {
+    // An empty quoted value (`class=""`) still gets an empty chunk, so the cursor
+    // inside it is a place where a class name can be written.
+    if cursor > static_start || (quote.is_some() && chunks.is_empty()) {
         chunks.push(Chunk::Static(Span::of(static_start..cursor.min(length))));
     }
     let after = if quote.is_some() && cursor < length {

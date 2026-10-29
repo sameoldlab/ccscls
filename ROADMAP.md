@@ -211,7 +211,7 @@ Original plan for the whole stage:
 
 ### Stage C: frameworks and JS import edges
 
-**C1 (Svelte): implemented, compiled; one scoped-style/graph test failing.** `languages/svelte.rs`, behind the `Language::Svelte` variant:
+**C1 (Svelte): implemented, compiled, and passing.** `languages/svelte.rs`, behind the `Language::Svelte` variant:
 
 - Scanner that skips balanced `{...}` (text, between attributes, inside values), strings, template
   literals and comments, so `>` and quotes inside expressions do not break tag scanning.
