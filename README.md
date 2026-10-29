@@ -5,18 +5,14 @@
 
 # css-class-lsp
 
+[![test](https://github.com/sameoldlab/ccscls/actions/workflows/test.yml/badge.svg)](https://github.com/sameoldlab/ccscls/actions/workflows/test.yml)
+
 A language server that indexes CSS class names and understands where classes are used in markup,
 like Tailwind's server but for plain CSS. Rust, `lsp-server` (sync message loop), tree-sitter-css.
 
 ## Status
 
-The stage 1 core loop (HTML + CSS folder: index, completion, hover, definition, references, live
-buffers, watching, ignores) is done and tested. See **[ROADMAP.md](ROADMAP.md)** for the full status,
-the verified/ambient/undefined model that drives the design, the planned stages (seam refactor, graph and
-verdicts, frameworks, rename, cascade/colour) and the libraries evaluated.
-
-Unbuilt work is specified as ignored tests; `cargo test -- --ignored` lists everything outstanding
-(all red until built). Spec files `tests/stage2..5_*.rs` map to roadmap stages in ROADMAP.md section 4.
+See **[ROADMAP.md](ROADMAP.md)**.
 
 ## Interactive feedback loop
 
@@ -101,6 +97,4 @@ Rules and their enforcement are in **[STYLE.md](STYLE.md)**; `tests/style.rs` ch
 * A space after a hex escape (`.x\1F600 {}`) belongs to the name token; `render_name` re-adds it on rename.
 * `initialize_finish` swallows the `initialized` notification, so the initial scan runs right
   after the handshake (a stage 1 test caught this).
-* The initial scan blocks the message loop; requests queue until it finishes.
-* Watcher events for gitignored files are indexed unless under `node_modules` (known gap).
 * HTML values containing `{{`, `{%`, `<%`, `<?` are opaque (no usages, no completion).

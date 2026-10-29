@@ -1,0 +1,64 @@
+name: release
+
+# Push a tag like v0.1.0 to build binaries and publish a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            binary: csscls
+          - os: macos-latest
+            target: aarch64-macos
+            binary: csscls
+          - os: windows-latest
+            target: x86_64-windows
+            binary: csscls.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the tag matches Cargo.toml
+        shell: bash
+        run: |
+          crate_version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          if [ "v${crate_version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${crate_version}"
+            exit 1
+          fi
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        shell: bash
+        run: |
+          archive="csscls-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          tar -czf "${archive}" -C target/release "${{ matrix.binary }}"
+          echo "ARCHIVE=${archive}" >> "${GITHUB_ENV}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true

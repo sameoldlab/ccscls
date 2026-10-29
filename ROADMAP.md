@@ -1,56 +1,79 @@
 # Roadmap and status
 
-Last updated after the stage 1 core loop and the design discussion about false positives.
+This is the single place for project status. Last updated after the first full `cargo test` run including stage C1 (Svelte).
+
 Run `cargo test` for the current state; `cargo test -- --ignored` lists unbuilt specs (all red by design).
+Debug the CSS grammar with `cargo run --example dump file.css`. Edition 2024.
 
 ## 1. Where things stand
 
-**Stage 1 (core loop)** and **stage A (language seam, both-sided file model, structural style)** are
-implemented.
+| Stage | State |
+|---|---|
+| Stage 1: core loop (HTML + CSS, index, completion, hover, definition, references, live buffers, watching, ignores) | Done, tested |
+| Stage A: language seam, both-sided file model, structural style | Done, tested |
+| Stage B1: graph core and verdicts | Done, compiled and tested on the author's machine |
+| Stage B2: LSP surface (ranked completion, linked hover, diagnostics, config) | Done, builds on the author's machine; not necessarily fully tested |
+| Stage C1: Svelte handler | Compiled; tests pass except one on scoped styles and the graph (see below) |
+| Stage C: JSX, Vue, JS import edges | Not started (JSX and Vue deferred) |
+| Stage D: rename | Not started (specs in `tests/stage2_rename.rs`, ignored) |
+| Stage E: applicability, cascade, colour hints | Not started |
+| Stage F: polish | Not started (specs in `tests/stage5_polish.rs`, ignored) |
 
-Verification state, stated plainly:
+### Verification state
 
-- The 41 library unit tests passed after the stage A rewrite, including a randomized check of the
-  intrusive name lists.
-- The integration tests (fixtures, LSP flow, style, stdio smoke) passed before stage A (74 tests). After
-  stage A only their glue code changed (how they obtain results from a language handler; no assertion
-  was edited). **They have not been run since.** The first `cargo test` on your machine is the real check.
-  One compile error found along the way (`Observed` needed `PartialEq`) was fixed by inspection.
-- The toolchain is no longer used to verify in this environment; if something fails, send the output.
-- Stage B1 (the graph core and verdicts) was compiled and tested on your machine and works.
-- Stage B2 was compiled and works on your machine ("builds successfully").
-- The Svelte handler (stage C1, below) was written after that and has **never been compiled**.
-- Stage B2 note, kept for reference: it was written after B1 and has been built, not necessarily fully tested. Expect the first
-  `cargo test` to find typos; the pure parts have unit tests to localise them, and the LSP behaviour
-  has its own file of tests (`stage_b_visibility.rs`).
-- One existing assertion changed on purpose: the exact hover text for a class used in a page now
-  includes the "linked: ..." line (`stage1_core.rs`, `hover_on_html_usage_shows_the_rule`).
+- A full `cargo test` run (non-ignored tests) was done on the author's machine after C1: everything
+  passes except one: `a_components_style_block_is_private_to_it` (`tests/stage_c_svelte.rs`), checking that a
+  component's scoped `<style>` class is not offered in another component's completion. Which side fails
+  (own-component completion or the leak assertion) was not recorded.
+- One assertion was changed on purpose after stage A: the exact hover text for a class used in a page
+  now includes the "linked: ..." line (`stage1_core.rs`, `hover_on_html_usage_shows_the_rule`).
+- The toolchain is not used to verify in the authoring environment; if something fails, send the output.
 
-What exists:
+### What exists
 
 - `languages/` seam: `Language` enum with detect, analyze, completion context, render name, watch globs.
-  CSS and HTML handlers behind it. Nothing else in the crate matches on a file type.
+  CSS, HTML and Svelte handlers behind it. Nothing else in the crate matches on a file type.
 - Both-sided file model: a file holds definitions and usages together as one list of occurrences.
 - Handles and a string pool: generational `FileId`/`OccurrenceId`, interned `NameId`, per-name occurrence
   lists linked by index. No lifetimes on the server, no `Box<str>` per item, no `dyn`.
 - Crate `Error` with a context chain, `Context` extension, per-message panic boundary, startup failures
   reported instead of panicking.
 - LSP: completion in `class="..."`, hover, goto definition, references (CSS and HTML, both directions),
-  live buffers over disk, file watching, `.gitignore` and `node_modules` respected.
+  live buffers over disk, file watching, `.gitignore` and `node_modules` respected, files over 2 MB skipped.
+- Import graph and verdicts (verified / ambient / undefined), diagnostics for open HTML pages, config
+  from `initializationOptions`.
+- CI: `.github/workflows/test.yml` runs `cargo test` on push to main and on pull requests (badge in the
+  README); `release.yml` builds Linux, macOS (arm64) and Windows binaries on a `v*` tag and attaches them
+  to a GitHub release. Neither has run yet.
 - Tooling: annotated fixtures, in-process LSP client, stdio smoke test, query CLI, playground,
   `scripts/dev-lsp`, style tests.
+- Test levels: unit tests in `src/`; level 1 annotated fixtures (`css_fixtures`, `html_fixtures`,
+  `svelte_fixtures`, `css_robustness`, `fixture_format`); level 2 LSP flow (`stage1_core`,
+  `stage_b_visibility`, `stage_c_svelte`, `scenarios`); level 3 `stdio_smoke`.
 
-**Known gaps in what exists** (none block the roadmap):
+### Known gaps in what exists
 
 - Watcher events for gitignored files are indexed (only `node_modules` is filtered).
-- The initial scan blocks the message loop.
-- `.svelte` / `.vue` files are not recognised yet; the HTML scanner is not brace-aware.
+- The initial scan blocks the message loop; requests queue until it finishes.
+- `.vue` and JSX files are not recognised; the HTML scanner is not brace-aware (Svelte has its own).
+- Parser robustness against hostile input is unproven. A 2 MB file-size cap exists, but there is no
+  tree-sitter parse timeout (`set_timeout_micros`). An older test for this (5000 `{`, 2000-deep `.a{`,
+  20k selectors, 200k-char identifier) did not finish and is no longer in the tree; re-add a bounded
+  version when doing stage F performance work.
+- Delimiters swallowed by tree-sitter-css error recovery (e.g. `.w;-1\/2`) are handled by cutting the name
+  at the first unescaped delimiter in the CSS handler (unit-tested). The old random-mutation test that
+  found this is no longer in the tree.
 - The kak-lsp config snippet in the README is from memory and untested.
 - The string pool never reclaims names (a few bytes per distinct name ever seen).
 - Test code still has single-letter names (`c`, `u`); `src/` is clean.
 - Config is read once from `initializationOptions`; `workspace/didChangeConfiguration` is not handled.
 - Verdict-based completion and diagnostics are name-level: they do not yet consider whether a rule's
-  selector could match the element (that is stage E).
+  selector could match the element (stage E).
+- Svelte scoped `<style>` blocks do not yet affect the graph as one test expects (`a_components_style_block_is_private_to_it`, the open failure from the
+  last full test run). Note the related known limit under stage C1: `:global(...)` rules are treated as private.
+- Repo hygiene to check: `src/css.rs` and `src/languages/css.rs` both exist with overlapping code;
+  `tests/stage4_scoping.rs` (5 ignored specs) is described below as replaced by the stage B tests;
+  `tests/stage3_frameworks.rs` still holds ignored JSX/Vue specs.
 
 ## 2. The central problem: false positives
 
@@ -103,7 +126,7 @@ independently of the server, which is how soundness is tested.
 
 Order changed from the original plan. Mapping to existing spec files is in section 4.
 
-### Stage A: language seam and both-sided file model (behavior-preserving) — implemented, partly verified
+### Stage A: language seam and both-sided file model (behavior-preserving) — implemented
 
 Today file-type knowledge leaks into `FileKind`/`detect` (workspace), `upsert`/`target_at` (branching on
 kind) and the completion handler (hard-codes HTML).
@@ -131,7 +154,7 @@ kind) and the completion handler (hard-codes HTML).
 
 ### Stage B: provenance, graph and verdicts
 
-**B1 (graph core and verdicts): written, not yet compiled.** The pure parts, with unit tests:
+**B1 (graph core and verdicts): implemented, compiled and tested.** The pure parts, with unit tests:
 
 - `Import` (specifier, span, optional condition) and `Scope` (shared or private) in the analysis model;
   `FileAnalysis` carries `imports` and an `open_world` flag.
@@ -145,7 +168,7 @@ kind) and the completion handler (hard-codes HTML).
   verified (with chain), ambient (with the files that define it) or undefined, plus `open_world`.
 - LSP behaviour is unchanged by B1.
 
-**B2 (LSP surface and specs): written, not yet compiled.**
+**B2 (LSP surface and specs): implemented, builds.**
 
 - Completion: linked classes first (`sortText` `0-name`, `labelDetails` showing the providing file), the
   rest after (`1-name`, "not linked"), never dropped. The `detail` is still "N rules" (visible rules for a
@@ -188,7 +211,7 @@ Original plan for the whole stage:
 
 ### Stage C: frameworks and JS import edges
 
-**C1 (Svelte): written, not yet compiled.** `languages/svelte.rs`, behind the `Language::Svelte` variant:
+**C1 (Svelte): implemented, compiled; one scoped-style/graph test failing.** `languages/svelte.rs`, behind the `Language::Svelte` variant:
 
 - Scanner that skips balanced `{...}` (text, between attributes, inside values), strings, template
   literals and comments, so `>` and quotes inside expressions do not break tag scanning.
@@ -245,9 +268,8 @@ Workspace symbols, config file, performance (async scan with a readiness signal)
 |---|---|---|
 | `tests/stage1_core.rs` | stays (core loop) | none; must stay green through stage A |
 | `tests/stage2_rename.rs` | stage D | none for global rename |
-| `tests/stage3_frameworks.rs` | stage C | none |
-| `tests/stage_b_visibility.rs`, `tests/scenarios.rs` | stage B | replaces the old stage4 file; implemented |
 | `tests/stage3_frameworks.rs` | stage C | now also holds the Svelte/Vue scoped-style specs |
+| `tests/stage_b_visibility.rs`, `tests/scenarios.rs` | stage B | replaces the old stage4 file; implemented |
 | `tests/stage5_polish.rs` | stage F | workspace symbols, ignore globs, declared edges, class attributes (all ignored) |
 
 ## 5. Colour previews (research notes)
