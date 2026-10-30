@@ -7,7 +7,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-
 fn complete_svelte(client: &mut TestClient, uri: &Uri, marked: &str) -> Vec<CompletionItem> {
     complete_marked(client, uri, "svelte", marked)
 }

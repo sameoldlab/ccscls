@@ -5,7 +5,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-
 fn complete_svelte(client: &mut TestClient, uri: &Uri, marked: &str) -> Vec<CompletionItem> {
     complete_marked(client, uri, "svelte", marked)
 }
@@ -19,7 +18,6 @@ const COMPONENT: &str = r#"<script>
 <button class:title={active}>explicit</button>
 <button class={['home', active && 'btn-large']}>svelte 5 array</button>
 "#;
-
 
 // ============================================================================
 // definition from directives and expressions

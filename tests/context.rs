@@ -76,7 +76,10 @@ fn html_outside_class_values() {
     assert_eq!(html_ctx(r#"<div class="a">te$0xt</div>"#), None);
     assert_eq!(html_ctx(r#"<div $0 class="a">"#), None);
     assert_eq!(html_ctx(r#"<!-- <div class="a$0"> -->"#), None);
-    assert_eq!(html_ctx(r#"<script>x = '<div class="a$0">'</script>"#), None);
+    assert_eq!(
+        html_ctx(r#"<script>x = '<div class="a$0">'</script>"#),
+        None
+    );
     assert_eq!(html_ctx(r#"<style>.a[class="b$0"] {}</style>"#), None);
     assert_eq!(html_ctx(r#"<p>class="a$0"</p>"#), None);
     // template syntax: opaque
@@ -113,7 +116,10 @@ fn html_unterminated_value_while_typing() {
 fn svelte_half_typed_markup() {
     assert_eq!(svelte_ctx(r#"<div class="x $0"#), some("", ""));
     assert_eq!(svelte_ctx(r#"<div class="typing ba$0"#), some("ba", "ba"));
-    assert_eq!(svelte_ctx("<div\n  class=\"one\n  tw$0o\">"), some("tw", "two"));
+    assert_eq!(
+        svelte_ctx("<div\n  class=\"one\n  tw$0o\">"),
+        some("tw", "two")
+    );
 }
 
 // ============================================================================
@@ -161,16 +167,28 @@ fn html_multiline_values_and_attribute_layouts() {
 fn svelte_mixed_static_text_and_expressions() {
     assert_eq!(svelte_ctx(r#"<div class="a {b} c$0">"#), some("c", "c"));
     assert_eq!(svelte_ctx(r#"<div class="a$0 {b} c">"#), some("a", "a"));
-    assert_eq!(svelte_ctx(r#"<div class="a {x ? 'bc' : ''}$0 d">"#), some("", ""));
+    assert_eq!(
+        svelte_ctx(r#"<div class="a {x ? 'bc' : ''}$0 d">"#),
+        some("", "")
+    );
     assert_eq!(svelte_ctx(r#"<div class="a {x $0 ? 'b' : ''}">"#), None);
 }
 
 #[test]
 fn svelte_string_literals_inside_expressions() {
-    assert_eq!(svelte_ctx(r#"<div class="a {x ? 'b$0' : ''} c">"#), some("b", "b"));
+    assert_eq!(
+        svelte_ctx(r#"<div class="a {x ? 'b$0' : ''} c">"#),
+        some("b", "b")
+    );
     assert_eq!(svelte_ctx(r#"<div class={['a$0']}>"#), some("a", "a"));
-    assert_eq!(svelte_ctx(r#"<div class={cond ? 'a' : 'b$0'}>"#), some("b", "b"));
-    assert_eq!(svelte_ctx(r#"<div class={['one two$0']}>"#), some("two", "two"));
+    assert_eq!(
+        svelte_ctx(r#"<div class={cond ? 'a' : 'b$0'}>"#),
+        some("b", "b")
+    );
+    assert_eq!(
+        svelte_ctx(r#"<div class={['one two$0']}>"#),
+        some("two", "two")
+    );
     assert_eq!(
         svelte_ctx(r#"<div class={{ 'is-b$0ig': big }}>"#),
         some("is-b", "is-big")

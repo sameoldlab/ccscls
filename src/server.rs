@@ -108,9 +108,7 @@ pub fn run(connection: Connection) -> Result<()> {
 
     let mut server = Server::new(&params);
     if let Some(error) = server.workspace.load_error() {
-        eprintln!(
-            "[csscls] a grammar failed to load, so its files are not indexed: {error}"
-        );
+        eprintln!("[csscls] a grammar failed to load, so its files are not indexed: {error}");
     }
     // `initialize_finish` has already consumed the client's `initialized`
     // notification, so the post-handshake work happens here.

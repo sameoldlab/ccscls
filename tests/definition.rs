@@ -4,7 +4,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-
 // ============================================================================
 // css
 // ============================================================================
@@ -106,8 +105,14 @@ fn definition_and_hover_reach_the_pages_own_style_block() {
 
 #[test]
 fn svelte_definition_is_null_for_undefined_classes_and_non_classes() {
-    let mut undefined = Session::start("//- /a.css\n.btn { }\n//- /A.svelte\n<p class=\"mis$0sing\">\n");
-    assert!(undefined.client.definition(&undefined.uri, undefined.position).is_none());
+    let mut undefined =
+        Session::start("//- /a.css\n.btn { }\n//- /A.svelte\n<p class=\"mis$0sing\">\n");
+    assert!(
+        undefined
+            .client
+            .definition(&undefined.uri, undefined.position)
+            .is_none()
+    );
     undefined.finish();
 
     let mut tag = Session::start("//- /a.css\n.btn { }\n//- /A.svelte\n<$0p class=\"btn\">\n");

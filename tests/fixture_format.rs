@@ -59,8 +59,13 @@ fn cursor_marker_is_required() {
 
 #[test]
 fn multi_file_fixtures_split_on_header_lines_and_find_the_cursor() {
-    let fixture = common::parse_fixture("//- /a.css\n.x { }\n//- /dir/B.svelte\n<p class=\"$0\">\n");
-    let paths: Vec<_> = fixture.files.iter().map(|file| file.path.as_str()).collect();
+    let fixture =
+        common::parse_fixture("//- /a.css\n.x { }\n//- /dir/B.svelte\n<p class=\"$0\">\n");
+    let paths: Vec<_> = fixture
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
     assert_eq!(paths, ["a.css", "dir/B.svelte"]);
     assert_eq!(fixture.files[0].text, ".x { }\n");
     assert_eq!(fixture.files[1].text, "<p class=\"\">\n");
@@ -70,5 +75,9 @@ fn multi_file_fixtures_split_on_header_lines_and_find_the_cursor() {
 
 #[test]
 fn multi_file_fixtures_without_a_cursor_have_none() {
-    assert!(common::parse_fixture("//- /a.css\n.x { }\n").cursor.is_none());
+    assert!(
+        common::parse_fixture("//- /a.css\n.x { }\n")
+            .cursor
+            .is_none()
+    );
 }

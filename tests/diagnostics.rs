@@ -6,7 +6,6 @@ use common::*;
 use lsp_types::*;
 use serde_json::json;
 
-
 fn expected(entries: &[(&str, DiagnosticSeverity)]) -> Vec<(String, DiagnosticSeverity)> {
     entries
         .iter()

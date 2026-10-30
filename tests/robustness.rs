@@ -85,8 +85,18 @@ fn every_prefix_and_suffix_of_every_fixture() {
             for (index, _) in source.char_indices().chain([(source.len(), ' ')]) {
                 let prefix = &source[..index];
                 let suffix = &source[index..];
-                check_input(&mut observer, language, prefix, &format!("{name} prefix {index}"));
-                check_input(&mut observer, language, suffix, &format!("{name} suffix {index}"));
+                check_input(
+                    &mut observer,
+                    language,
+                    prefix,
+                    &format!("{name} prefix {index}"),
+                );
+                check_input(
+                    &mut observer,
+                    language,
+                    suffix,
+                    &format!("{name} suffix {index}"),
+                );
             }
         }
     }
@@ -181,7 +191,10 @@ fn hostile_css_finishes() {
         ("many open braces", "{".repeat(5_000)),
         ("deeply nested rules", ".a{".repeat(2_000)),
         ("many selectors", ".c{}".repeat(20_000)),
-        ("one very long identifier", format!(".{} {{}}", "a".repeat(200_000))),
+        (
+            "one very long identifier",
+            format!(".{} {{}}", "a".repeat(200_000)),
+        ),
         ("many escapes", ".\\".repeat(20_000)),
     ] {
         index_within_limit(Language::Css, source, what);
@@ -194,9 +207,18 @@ fn hostile_markup_finishes() {
         for (what, source) in [
             ("many open tags", "<div ".repeat(20_000)),
             ("many unclosed class values", "<p class=\"".repeat(20_000)),
-            ("one huge class value", format!("<p class=\"{}\">", "a ".repeat(100_000))),
-            ("many open braces", format!("<p class={}", "{".repeat(20_000))),
-            ("nested expressions", format!("<p class={}", "{[".repeat(5_000))),
+            (
+                "one huge class value",
+                format!("<p class=\"{}\">", "a ".repeat(100_000)),
+            ),
+            (
+                "many open braces",
+                format!("<p class={}", "{".repeat(20_000)),
+            ),
+            (
+                "nested expressions",
+                format!("<p class={}", "{[".repeat(5_000)),
+            ),
             ("many comments", "<!--".repeat(20_000)),
             ("many styles", "<style>.a{}</style>".repeat(5_000)),
         ] {

@@ -5,7 +5,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-
 // ============================================================================
 // css
 // ============================================================================
@@ -112,9 +111,7 @@ fn svelte_unsaved_buffer_adds_usages() {
 #[test]
 fn svelte_typing_a_class_is_reflected_immediately() {
     let mut session = Session::start("//- /a.css\n.card { }\n//- /A.svelte\n<p class=\"$0\">\n");
-    session
-        .client
-        .change(&session.uri, 2, "<p class=\"ca\">");
+    session.client.change(&session.uri, 2, "<p class=\"ca\">");
     let items = complete_items(&mut session.client, &session.uri, Position::new(0, 12));
     assert!(items.iter().any(|item| item.label == "card"));
     session.finish();
@@ -162,9 +159,8 @@ fn columns_are_utf16_on_both_sides() {
 #[test]
 fn svelte_columns_are_utf16() {
     // 😀 is 2 UTF-16 units and é is 1, so byte columns would differ.
-    let mut session = Session::start(
-        "//- /a.css\n.z$0z { }\n//- /A.svelte\n<p title=\"😀é\" class=\"zz\">\n",
-    );
+    let mut session =
+        Session::start("//- /a.css\n.z$0z { }\n//- /A.svelte\n<p title=\"😀é\" class=\"zz\">\n");
     let found = session.references(true);
     let range_in = |name: &str| {
         found
