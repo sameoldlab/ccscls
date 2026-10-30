@@ -2,7 +2,7 @@
 //! (half-typed text, damaged text, hostile text) must index without panicking,
 //! without hanging, and with spans that point at real text.
 //!
-//!  Deterministic input:
+//! Three kinds of input, all deterministic:
 //!   1. every prefix and suffix of every fixture (typing and deleting),
 //!   2. seeded random damage to every fixture,
 //!   3. a few hostile shapes, each under a time limit.
@@ -201,6 +201,17 @@ fn hostile_markup_finishes() {
             ("many styles", "<style>.a{}</style>".repeat(5_000)),
         ] {
             index_within_limit(language, source, &format!("{language:?}: {what}"));
+        }
+    }
+}
+
+#[test]
+fn the_completion_context_never_panics_while_typing() {
+    for (language, directory, extension) in language_cases() {
+        for (_name, source) in fixtures(directory, extension) {
+            for (index, _) in source.char_indices().chain([(source.len(), ' ')]) {
+                let _ = language.class_context_at(&source[..index], index);
+            }
         }
     }
 }

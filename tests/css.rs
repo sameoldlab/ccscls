@@ -1,6 +1,7 @@
-//! Level 1b: typing simulation. An editor feeds the indexer half-typed CSS on
-//! every keystroke, so every prefix/suffix of every fixture must index without
-//! panicking and with sane spans. (Deliberately NOT adversarial: no fuzzing.)
+//! Level 1: invariants that only CSS has. A class token is an identifier, so
+//! its name must equal the unescaped source text and must not contain an
+//! unescaped delimiter, even when the CSS is half-typed. (The checks every
+//! language shares are in `robustness.rs`.)
 
 use csscls::languages::Language;
 use csscls::languages::css::unescape_ident;

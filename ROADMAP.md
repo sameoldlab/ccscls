@@ -13,21 +13,19 @@ Debug the CSS grammar with `cargo run --example dump file.css`. Edition 2024.
 | Stage A: language seam, both-sided file model, structural style | Done, tested |
 | Stage B1: graph core and verdicts | Done, compiled and tested on the author's machine |
 | Stage B2: LSP surface (ranked completion, linked hover, diagnostics, config) | Done, builds on the author's machine; not necessarily fully tested |
-| Stage C1: Svelte handler | Compiled; tests pass except one on scoped styles and the graph (see below) |
+| Stage C1: Svelte handler | Done, tested |
 | Stage C: JSX, Vue, JS import edges | Not started (JSX and Vue deferred) |
-| Stage D: rename | Not started (specs in `tests/stage2_rename.rs`, ignored) |
+| Stage D: rename | Not started (specs in `tests/rename.rs`, ignored) |
 | Stage E: applicability, cascade, colour hints | Not started |
-| Stage F: polish | Not started (specs in `tests/stage5_polish.rs`, ignored) |
+| Stage F: polish | Not started (specs in `tests/symbols.rs`, `tests/config.rs`, `tests/visibility.rs`, ignored) |
 
 ### Verification state
 
-- A full `cargo test` run (non-ignored tests) was done on the author's machine after C1: everything
-  passes except one: `a_components_style_block_is_private_to_it` (`tests/stage_c_svelte.rs`), checking that a
-  component's scoped `<style>` class is not offered in another component's completion. Which side fails
-  (own-component completion or the leak assertion) was not recorded.
+- Last full run (Rust 1.91, `cargo test --locked`): 192 passed, 0 failed, 18 ignored. The C1 failures
+  were an empty `class=""` value producing no completion context; fixed in `read_value`.
 - One assertion was changed on purpose after stage A: the exact hover text for a class used in a page
-  now includes the "linked: ..." line (`stage1_core.rs`, `hover_on_html_usage_shows_the_rule`).
-- The toolchain is not used to verify in the authoring environment; if something fails, send the output.
+  now includes the "linked: ..." line (`hover.rs`, `hover_on_html_usage_shows_the_rule`).
+- Edition 2024 needs Rust 1.85 or newer.
 
 ### What exists
 
@@ -47,9 +45,11 @@ Debug the CSS grammar with `cargo run --example dump file.css`. Edition 2024.
   to a GitHub release. Neither has run yet.
 - Tooling: annotated fixtures, in-process LSP client, stdio smoke test, query CLI, playground,
   `scripts/dev-lsp`, style tests.
-- Test levels: unit tests in `src/`; level 1 annotated fixtures (`css_fixtures`, `html_fixtures`,
-  `svelte_fixtures`, `css_robustness`, `fixture_format`); level 2 LSP flow (`stage1_core`,
-  `stage_b_visibility`, `stage_c_svelte`, `scenarios`); level 3 `stdio_smoke`.
+- Test levels: unit tests in `src/`; level 1 per handler (`analysis`, `context`, `robustness`, `css`,
+  `fixture_format`, `scenarios`); level 2 LSP flow, one file per feature (`completion`, `definition`,
+  `references`, `hover`, `buffers`, `watching`, `diagnostics`, `visibility`, `protocol`, plus
+  `svelte` for Svelte-only syntax); level 3 `stdio_smoke`. Unbuilt features are ignored tests whose
+  reason starts with `not built:`.
 
 ### Known gaps in what exists
 
@@ -69,11 +69,8 @@ Debug the CSS grammar with `cargo run --example dump file.css`. Edition 2024.
 - Config is read once from `initializationOptions`; `workspace/didChangeConfiguration` is not handled.
 - Verdict-based completion and diagnostics are name-level: they do not yet consider whether a rule's
   selector could match the element (stage E).
-- Svelte scoped `<style>` blocks do not yet affect the graph as one test expects (`a_components_style_block_is_private_to_it`, the open failure from the
-  last full test run). Note the related known limit under stage C1: `:global(...)` rules are treated as private.
-- Repo hygiene to check: `src/css.rs` and `src/languages/css.rs` both exist with overlapping code;
-  `tests/stage4_scoping.rs` (5 ignored specs) is described below as replaced by the stage B tests;
-  `tests/stage3_frameworks.rs` still holds ignored JSX/Vue specs.
+- Svelte `:global(...)` rules in a component's `<style>` are treated as private (see stage C1).
+- Repo hygiene to check: `src/css.rs` and `src/languages/css.rs` both exist with overlapping code.
 
 ## 2. The central problem: false positives
 
@@ -185,7 +182,7 @@ kind) and the completion handler (hard-codes HTML).
   `information`, `warning`, `error`) and `reportInOpenWorld`. Unreadable options fall back to the
   defaults and are logged.
 - Tests: `scenarios.rs` (annotated scenario workspaces, `<!--v: name=verdict -->` and
-  `<!--world: open -->` markers), `stage_b_visibility.rs` (LSP level), and unit tests in `config.rs`,
+  `<!--world: open -->` markers), `completion.rs`, `hover.rs`, `diagnostics.rs` and `visibility.rs` (LSP level), and unit tests in `config.rs`,
   `workspace/visibility.rs` and `server.rs`.
 - Deferred to stage 5: declared edges and ignore globs (specs exist, ignored), reading config changes
   after startup.
@@ -221,8 +218,8 @@ Original plan for the whole stage:
   expression; nothing outside class positions.
 - `<style>` blocks (plain CSS only; `lang="scss"` etc. are skipped) become private definitions.
 - Every component is open-world, so diagnostics stay quiet unless `reportInOpenWorld` is set.
-- Tests: `svelte_fixtures.rs` (annotated fixtures), `svelte_context.rs` (cursor positions),
-  `stage_c_svelte.rs` (LSP level), and unit tests in `svelte.rs`.
+- Tests: `analysis.rs` (annotated fixtures), `context.rs` (cursor positions), the Svelte sections of
+  the feature files and `svelte.rs` (LSP level), and unit tests in `src/languages/svelte.rs`.
 - Known limits: a string literal inside a class expression is assumed to be a class name; `:global(...)`
   rules in a component's `<style>` are still treated as private rather than global; object-key detection
   is lexical (an unusual destructuring pattern could be misread); rename needs more than `render_name`
@@ -238,7 +235,7 @@ Original plan for the whole stage:
   incl. array/object forms), Vue (`:class` / `v-bind:class`: strings, array items, object keys).
 - JS `import "./x.css"` edges via a real resolver (see libraries); tsconfig paths and aliases.
 - Svelte/Vue scoped and module styles via the embedded-region mechanism from stage A.
-- Specs: `tests/stage3_frameworks.rs` (jsx, svelte, vue) plus the scoped-style specs from stage 4.
+- Specs: the ignored `jsx_*` and `vue_*` tests in `definition.rs`, `completion.rs`, `references.rs` and `visibility.rs`.
 
 ### Stage D: rename (global)
 
@@ -247,7 +244,7 @@ Original plan for the whole stage:
 - Rename is global by name: every definition and usage. After stage B it can report skipped or uncertain
   occurrences (ambient ones, dynamic strings); a verified-scoped rename is a filter on the global one.
 - Needs `render name` from stage A: CSS escaping, hex-escape terminator space, Svelte shorthand expansion.
-- Specs: `tests/stage2_rename.rs` (compatible with global semantics, can stay as written).
+- Specs: `tests/rename.rs` (compatible with global semantics, can stay as written).
 
 ### Stage E: applicability, cascade, colour hints
 
@@ -262,15 +259,15 @@ Original plan for the whole stage:
 
 Workspace symbols, config file, performance (async scan with a readiness signal), watcher/gitignore gap.
 
-## 4. Mapping to existing spec files
+## 4. Where the unbuilt specs live
 
-| File | Becomes | Change needed |
-|---|---|---|
-| `tests/stage1_core.rs` | stays (core loop) | none; must stay green through stage A |
-| `tests/stage2_rename.rs` | stage D | none for global rename |
-| `tests/stage3_frameworks.rs` | stage C | now also holds the Svelte/Vue scoped-style specs |
-| `tests/stage_b_visibility.rs`, `tests/scenarios.rs` | stage B | replaces the old stage4 file; implemented |
-| `tests/stage5_polish.rs` | stage F | workspace symbols, ignore globs, declared edges, class attributes (all ignored) |
+`cargo test -- --ignored` lists them; each reason starts with `not built:`.
+
+| Specs | Stage |
+|---|---|
+| `tests/rename.rs` (9 tests) | D |
+| `jsx_*` in `definition.rs`, `completion.rs`, `references.rs`; `vue_*` in `definition.rs`, `visibility.rs` | C (JSX, Vue) |
+| `tests/symbols.rs` (workspace symbols), `tests/config.rs` (ignore globs, class attributes), declared edges in `tests/visibility.rs` | F |
 
 ## 5. Colour previews (research notes)
 

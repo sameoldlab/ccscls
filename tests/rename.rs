@@ -1,12 +1,12 @@
-//! Stage 2: rename across CSS and HTML. NOT IMPLEMENTED YET: these are the spec.
-//! Run with `cargo test --test stage2_rename -- --ignored`.
+//! Rename across CSS and HTML. NOT IMPLEMENTED YET: these are the spec.
+//! Run with `cargo test --test rename -- --ignored`.
 
 mod common;
 use common::*;
 use csscls::languages::Language;
 use lsp_types::*;
 
-const TODO: &str = "stage 2: rename";
+const TODO: &str = "not built: rename";
 
 fn rename(
     c: &mut TestClient,

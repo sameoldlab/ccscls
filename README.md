@@ -53,10 +53,17 @@ Each level uses the one below it as a trusted base.
 
   Every class on an unmarked line must NOT be found, so false positives fail too. Expectations
   are written from CSS/HTML semantics, never copied from output. `$0` marks a cursor in inline
-  tests (`tests/html_context.rs`). `tests/fixture_format.rs` tests this tooling itself.
-  `tests/css_robustness.rs` is a cheap typing simulation (every prefix/suffix of every fixture);
-  it is deliberately not adversarial.
-* **Level 2, through the LSP machinery** (`tests/stage*.rs`): an in-process client
+  tests (`tests/context.rs`). `tests/analysis.rs` runs the fixtures; `tests/fixture_format.rs` tests
+  this tooling itself. `tests/robustness.rs` feeds every language handler half-typed text (every
+  prefix and suffix of every fixture), seeded random damage, and a few hostile shapes under a time
+  limit. `tests/css.rs` holds the checks only CSS has.
+* **Level 2, through the LSP machinery** (one file per feature: `completion`, `definition`,
+  `references`, `hover`, `buffers`, `watching`, `diagnostics`, `visibility`, `protocol`; Svelte-only
+  syntax is in `svelte.rs`). Inside a file, tests that mirror each other across CSS, HTML and Svelte sit
+  together, then whatever is left has a section per language. Unbuilt features are ignored tests whose
+  reason starts with `not built:` (`rename.rs`, `symbols.rs`, `config.rs`, and JSX/Vue cases in the
+  feature files). Workspaces can be written inline: `//- /path` lines split files and `$0` marks the
+  cursor (`common::Session`). An in-process client
   (`tests/common`, over `Connection::memory()`) drives the real server loop with real messages
   against `tests/fixtures/site` (copied to a temp dir). Expected locations are computed from the
   fixture annotations, independently of the server.

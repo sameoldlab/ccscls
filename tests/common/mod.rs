@@ -758,6 +758,9 @@ pub fn diagnostic_summary(
 }
 
 // ---- shared sessions and request helpers -----------------------------------
+//
+// One definition per feature, so a change to how the server is driven touches
+// this file and not every test file.
 
 /// The `site` fixture copied to a temp dir, with a server started on it.
 pub fn site_with(options: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
@@ -934,6 +937,70 @@ impl Session {
     }
 }
 
+impl Session {
+    pub fn definition(&mut self) -> Vec<Location> {
+        let mut found = self.client.definition_locations(&self.uri, self.position);
+        sort_locations(&mut found);
+        found
+    }
+
+    /// Reference locations at the cursor; no response counts as none.
+    pub fn references(&mut self, include_declaration: bool) -> Vec<Location> {
+        let mut found = self
+            .client
+            .references(&self.uri, self.position, include_declaration)
+            .unwrap_or_default();
+        sort_locations(&mut found);
+        found
+    }
+
+    pub fn hover(&mut self) -> Option<lsp_types::Hover> {
+        self.client.hover(&self.uri, self.position)
+    }
+
+    pub fn finish(self) {
+        self.client.shutdown();
+    }
+}
+
+/// The last path segment of each location, sorted: which files a result touches.
+pub fn file_names(locations: &[Location]) -> Vec<String> {
+    let mut names: Vec<String> = locations
+        .iter()
+        .map(|location| {
+            location
+                .uri
+                .as_str()
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// Go-to-definition from `chars_in` characters into `needle` must land on every
+/// CSS rule of `class` in the workspace.
+pub fn assert_resolves(
+    client: &mut TestClient,
+    workspace: &TempWorkspace,
+    doc: &Uri,
+    text: &str,
+    needle: &str,
+    chars_in: usize,
+    class: &str,
+) {
+    let mut got = client.definition_locations(doc, position_of(text, needle, chars_in));
+    sort_locations(&mut got);
+    assert_eq!(
+        got,
+        workspace.expected_locations(class),
+        "`{needle}` should resolve to .{class}"
+    );
+}
+
 /// Labels offered at the `$0` cursor of a multi-file fixture.
 pub fn completion_labels(source: &str) -> Vec<String> {
     let mut session = Session::start(source);
@@ -941,3 +1008,19 @@ pub fn completion_labels(source: &str) -> Vec<String> {
     session.client.shutdown();
     items.into_iter().map(|item| item.label).collect()
 }
+
+/// Labels offered at the `$0` cursor of `marked`, opened as `language_id`.
+pub fn complete_labels(
+    client: &mut TestClient,
+    uri: &Uri,
+    marked: &str,
+    language_id: &str,
+) -> Vec<String> {
+    complete_marked(client, uri, language_id, marked)
+        .into_iter()
+        .map(|item| item.label)
+        .collect()
+}
+
+/// A page with its own style block, used by definition, hover and diagnostics tests.
+pub const INLINE_PAGE: &str = "<!doctype html><html><head><style>.only { }</style></head><body><p class=\"only\"></p></body></html>";
