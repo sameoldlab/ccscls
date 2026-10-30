@@ -8,16 +8,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-fn site_with(init: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
-    let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions {
-        workspace: Some(ws.path().to_path_buf()),
-        init_options: init,
-        ..Default::default()
-    });
-    (ws, c)
-}
-
 #[test]
 #[ignore = "stage 5: workspace symbols"]
 fn workspace_symbol_searches_class_names() {

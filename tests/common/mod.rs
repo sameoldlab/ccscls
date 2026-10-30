@@ -229,6 +229,11 @@ pub struct TempWorkspace {
 }
 
 impl TempWorkspace {
+    pub fn empty() -> Self {
+        Self {
+            dir: tempfile::tempdir().unwrap(),
+        }
+    }
     pub fn copy_fixture(name: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         copy_dir(&fixtures_dir().join(name), dir.path());
@@ -750,4 +755,189 @@ pub fn diagnostic_summary(
         .collect();
     found.sort_by(|left, right| left.0.cmp(&right.0));
     found
+}
+
+// ---- shared sessions and request helpers -----------------------------------
+
+/// The `site` fixture copied to a temp dir, with a server started on it.
+pub fn site_with(options: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
+    let workspace = TempWorkspace::copy_fixture("site");
+    let client = TestClient::start(ClientOptions {
+        workspace: Some(workspace.path().to_path_buf()),
+        init_options: options,
+        ..Default::default()
+    });
+    (workspace, client)
+}
+
+pub fn site() -> (TempWorkspace, TestClient) {
+    site_with(None)
+}
+
+/// A fixture from `fixtures/scenarios/<name>` with a server started on it.
+pub fn scenario(name: &str) -> (TempWorkspace, TestClient) {
+    let workspace = TempWorkspace::copy_fixture(&format!("scenarios/{name}"));
+    let client = TestClient::start(ClientOptions {
+        workspace: Some(workspace.path().to_path_buf()),
+        ..Default::default()
+    });
+    (workspace, client)
+}
+
+/// The raw completion response at `position` in an already-known document.
+pub fn complete(
+    client: &mut TestClient,
+    uri: &Uri,
+    position: Position,
+) -> Option<lsp_types::CompletionResponse> {
+    client.request::<lsp_types::request::Completion>(lsp_types::CompletionParams {
+        text_document_position: position_params(uri, position),
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    })
+}
+
+/// The items of a completion response. Panics if the server returned none.
+pub fn labels(response: Option<lsp_types::CompletionResponse>) -> Vec<String> {
+    match response.expect("expected completion items") {
+        lsp_types::CompletionResponse::Array(items) => {
+            items.into_iter().map(|item| item.label).collect()
+        }
+        lsp_types::CompletionResponse::List(list) => {
+            list.items.into_iter().map(|item| item.label).collect()
+        }
+    }
+}
+
+/// Completion items at `position`; no response means no items.
+pub fn complete_items(
+    client: &mut TestClient,
+    uri: &Uri,
+    position: Position,
+) -> Vec<lsp_types::CompletionItem> {
+    match complete(client, uri, position) {
+        Some(lsp_types::CompletionResponse::Array(items)) => items,
+        Some(lsp_types::CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    }
+}
+
+/// Opens `marked` (text with a `$0` cursor) as a buffer and completes at the cursor.
+pub fn complete_marked(
+    client: &mut TestClient,
+    uri: &Uri,
+    language_id: &str,
+    marked: &str,
+) -> Vec<lsp_types::CompletionItem> {
+    let (text, position) = parse_cursor(marked);
+    client.open(uri, language_id, &text);
+    complete_items(client, uri, position)
+}
+
+/// The markdown of a hover response. Panics if there is no hover.
+pub fn hover_text(hover: Option<lsp_types::Hover>) -> String {
+    match hover.expect("expected hover").contents {
+        lsp_types::HoverContents::Markup(markup) => markup.value,
+        other => panic!("unexpected hover contents {other:?}"),
+    }
+}
+
+// ---- multi-file fixtures ----------------------------------------------------
+//
+// A whole workspace as one string, for level-2 tests:
+//
+//     //- /a.css
+//     .btn { }
+//     //- /Page.svelte
+//     <p class="$0">
+//
+// A `//- /path` line starts a file. `$0` marks the cursor in at most one file.
+
+pub struct FixtureFile {
+    pub path: String,
+    pub text: String,
+}
+
+pub struct Fixture {
+    pub files: Vec<FixtureFile>,
+    /// Index into `files` and the position of the `$0` marker, if there is one.
+    pub cursor: Option<(usize, Position)>,
+}
+
+pub fn parse_fixture(source: &str) -> Fixture {
+    let mut files: Vec<FixtureFile> = Vec::new();
+    let mut cursor = None;
+    for line in source.split_inclusive('\n') {
+        if let Some(path) = line.strip_prefix("//- ") {
+            files.push(FixtureFile {
+                path: path.trim().trim_start_matches('/').to_owned(),
+                text: String::new(),
+            });
+            continue;
+        }
+        let file = files
+            .last_mut()
+            .expect("a fixture must start with a `//- /path` line");
+        file.text.push_str(line);
+    }
+    for (index, file) in files.iter_mut().enumerate() {
+        if file.text.contains("$0") {
+            assert!(cursor.is_none(), "a fixture may contain only one `$0`");
+            let (text, position) = parse_cursor(&file.text);
+            file.text = text;
+            cursor = Some((index, position));
+        }
+    }
+    Fixture { files, cursor }
+}
+
+/// A workspace and server built from a multi-file fixture. Every file is on
+/// disk before the server starts, so the initial scan sees all of them; the
+/// cursor file is also opened as a live buffer.
+pub struct Session {
+    pub workspace: TempWorkspace,
+    pub client: TestClient,
+    pub uri: Uri,
+    pub position: Position,
+    pub language_id: String,
+}
+
+impl Session {
+    pub fn start(source: &str) -> Self {
+        let fixture = parse_fixture(source);
+        let (index, position) = fixture.cursor.expect("the fixture needs a `$0` cursor");
+        let workspace = TempWorkspace::empty();
+        for file in &fixture.files {
+            workspace.write(&file.path, &file.text);
+        }
+        let client = TestClient::start(ClientOptions {
+            workspace: Some(workspace.path().to_path_buf()),
+            ..Default::default()
+        });
+        let cursor_file = &fixture.files[index];
+        let language_id = cursor_file
+            .path
+            .rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let uri = workspace.uri(&cursor_file.path);
+        client.open(&uri, &language_id, &cursor_file.text);
+        Self {
+            workspace,
+            client,
+            uri,
+            position,
+            language_id,
+        }
+    }
+}
+
+/// Labels offered at the `$0` cursor of a multi-file fixture.
+pub fn completion_labels(source: &str) -> Vec<String> {
+    let mut session = Session::start(source);
+    let items = complete_items(&mut session.client, &session.uri, session.position);
+    session.client.shutdown();
+    items.into_iter().map(|item| item.label).collect()
 }

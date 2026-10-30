@@ -9,15 +9,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-fn site() -> (TempWorkspace, TestClient) {
-    let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions {
-        workspace: Some(ws.path().to_path_buf()),
-        ..Default::default()
-    });
-    (ws, c)
-}
-
 fn labels(c: &mut TestClient, u: &Uri, marked: &str, lang: &str) -> Vec<String> {
     let (text, pos) = parse_cursor(marked);
     c.open(u, lang, &text);

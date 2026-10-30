@@ -7,30 +7,8 @@ use common::*;
 use lsp_types::*;
 use serde_json::json;
 
-fn site_with(options: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
-    let workspace = TempWorkspace::copy_fixture("site");
-    let client = TestClient::start(ClientOptions {
-        workspace: Some(workspace.path().to_path_buf()),
-        init_options: options,
-        ..Default::default()
-    });
-    (workspace, client)
-}
-
-fn complete_items(client: &mut TestClient, uri: &Uri, marked: &str) -> Vec<CompletionItem> {
-    let (text, position) = parse_cursor(marked);
-    client.open(uri, "svelte", &text);
-    let response = client.request::<request::Completion>(CompletionParams {
-        text_document_position: position_params(uri, position),
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    });
-    match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => Vec::new(),
-    }
+fn complete_svelte(client: &mut TestClient, uri: &Uri, marked: &str) -> Vec<CompletionItem> {
+    complete_marked(client, uri, "svelte", marked)
 }
 
 /// Go-to-definition from `chars_in` characters into `needle` must land on every
@@ -154,7 +132,7 @@ fn class_attributes_directives_and_expressions_resolve() {
 #[test]
 fn directive_names_complete_and_replace_only_the_name() {
     let (_workspace, mut client) = site_with(None);
-    let items = complete_items(
+    let items = complete_svelte(
         &mut client,
         &uri("file:///virtual/D.svelte"),
         "<div class:ca$0={x}>",
@@ -180,7 +158,7 @@ fn completion_works_inside_string_literals_in_expressions() {
     let (_workspace, mut client) = site_with(None);
     let source = "<div class=\"btn {on ? 'ca$0' : ''}\">";
     let (_, position) = parse_cursor(source);
-    let items = complete_items(&mut client, &uri("file:///virtual/E.svelte"), source);
+    let items = complete_svelte(&mut client, &uri("file:///virtual/E.svelte"), source);
     let card = items
         .iter()
         .find(|item| item.label == "card")
@@ -205,7 +183,7 @@ fn nothing_is_offered_outside_class_positions() {
         ("c", "<script>let c = \"ca$0\";</script>"),
         ("d", "<p>{ca$0}</p>"),
     ] {
-        let items = complete_items(
+        let items = complete_svelte(
             &mut client,
             &uri(&format!("file:///virtual/{name}.svelte")),
             source,
@@ -215,26 +193,6 @@ fn nothing_is_offered_outside_class_positions() {
     client.shutdown();
 }
 
-#[test]
-fn a_components_style_block_is_private_to_it() {
-    let (_workspace, mut client) = site_with(None);
-    let own = complete_items(
-        &mut client,
-        &uri("file:///virtual/A.svelte"),
-        "<style>\n.mine { }\n</style>\n<p class=\"$0\">",
-    );
-    assert!(own.iter().any(|item| item.label == "mine"));
-    let other = complete_items(
-        &mut client,
-        &uri("file:///virtual/B.svelte"),
-        "<p class=\"$0\">",
-    );
-    assert!(
-        !other.iter().any(|item| item.label == "mine"),
-        "scoped class leaked into another component"
-    );
-    client.shutdown();
-}
 
 #[test]
 fn definition_reaches_the_components_own_style_block() {

@@ -9,15 +9,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-fn site() -> (TempWorkspace, TestClient) {
-    let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions {
-        workspace: Some(ws.path().to_path_buf()),
-        ..Default::default()
-    });
-    (ws, c)
-}
-
 /// Go-to-definition from `needle` (cursor 1 char in) must land on every CSS rule of `class`.
 fn assert_resolves(
     c: &mut TestClient,

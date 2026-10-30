@@ -8,15 +8,6 @@ use lsp_types::*;
 
 const TODO: &str = "stage 2: rename";
 
-fn site() -> (TempWorkspace, TestClient) {
-    let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions {
-        workspace: Some(ws.path().to_path_buf()),
-        ..Default::default()
-    });
-    (ws, c)
-}
-
 fn rename(
     c: &mut TestClient,
     u: &Uri,

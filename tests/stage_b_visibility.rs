@@ -8,50 +8,6 @@ use common::*;
 use lsp_types::*;
 use serde_json::json;
 
-fn site_with(options: Option<serde_json::Value>) -> (TempWorkspace, TestClient) {
-    let workspace = TempWorkspace::copy_fixture("site");
-    let client = TestClient::start(ClientOptions {
-        workspace: Some(workspace.path().to_path_buf()),
-        init_options: options,
-        ..Default::default()
-    });
-    (workspace, client)
-}
-
-fn site() -> (TempWorkspace, TestClient) {
-    site_with(None)
-}
-
-fn scenario(name: &str) -> (TempWorkspace, TestClient) {
-    let workspace = TempWorkspace::copy_fixture(&format!("scenarios/{name}"));
-    let client = TestClient::start(ClientOptions {
-        workspace: Some(workspace.path().to_path_buf()),
-        ..Default::default()
-    });
-    (workspace, client)
-}
-
-fn complete_items(client: &mut TestClient, uri: &Uri, position: Position) -> Vec<CompletionItem> {
-    let response = client.request::<request::Completion>(CompletionParams {
-        text_document_position: position_params(uri, position),
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    });
-    match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => Vec::new(),
-    }
-}
-
-fn hover_text(hover: Option<Hover>) -> String {
-    match hover.expect("expected hover").contents {
-        HoverContents::Markup(markup) => markup.value,
-        other => panic!("unexpected hover contents {other:?}"),
-    }
-}
-
 fn expected(entries: &[(&str, DiagnosticSeverity)]) -> Vec<(String, DiagnosticSeverity)> {
     entries
         .iter()

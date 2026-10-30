@@ -8,38 +8,6 @@ mod common;
 use common::*;
 use lsp_types::*;
 
-fn site() -> (TempWorkspace, TestClient) {
-    let ws = TempWorkspace::copy_fixture("site");
-    let c = TestClient::start(ClientOptions {
-        workspace: Some(ws.path().to_path_buf()),
-        ..Default::default()
-    });
-    (ws, c)
-}
-
-fn labels(r: Option<CompletionResponse>) -> Vec<String> {
-    match r.expect("expected completion items") {
-        CompletionResponse::Array(items) => items.into_iter().map(|i| i.label).collect(),
-        CompletionResponse::List(l) => l.items.into_iter().map(|i| i.label).collect(),
-    }
-}
-
-fn complete(c: &mut TestClient, u: &Uri, pos: Position) -> Option<CompletionResponse> {
-    c.request::<request::Completion>(CompletionParams {
-        text_document_position: position_params(u, pos),
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    })
-}
-
-fn hover_text(h: Option<Hover>) -> String {
-    match h.expect("expected hover").contents {
-        HoverContents::Markup(m) => m.value,
-        other => panic!("unexpected hover contents {other:?}"),
-    }
-}
-
 // ---- handshake ------------------------------------------------------------
 
 #[test]
